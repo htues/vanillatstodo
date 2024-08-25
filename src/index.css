@@ -7,20 +7,25 @@
 @import url("https://fonts.googleapis.com/css?family=Anton:wght@200,300,400&display=swap");
 
 @layer components {
-  body {
-    @apply overflow-x-hidden font-sans;
+  .bg {
+    @apply h-screen w-screen p-4 bg-gradient-to-r from-[#2F80ED] to-[#1CB5E0];
   }
-  .btn {
-    @apply flex gap-2 items-center justify-center px-4 py-2 rounded-lg font-semibold shadow-md;
+  .container {
+    @apply bg-slate-100 max-w-[500px] w-full m-auto rounded-md shadow-xl p-4;
   }
-  .btn.btn-light{
-    @apply bg-white text-gray-500;
+  .heading {
+    @apply text-3xl font-bold text-center text-gray-800 p-2;
   }
-  .btn.btn-danger{
-    @apply bg-red-600 text-white shadow-red-400/40;
+  .form {
+    @apply flex justify-between;
   }
-
-  .sidebar-item {
-    @apply w-60 text-white h-screen; /* Reduced width from w-64 to w-60 */
+  .input {
+    @apply border p-2 w-full text-xl;
+  }
+  .button {
+    @apply border p-4 ml-2 bg-purple-500 text-slate-100;
+  }
+  .count {
+    @apply text-center p-2;
   }
 }
