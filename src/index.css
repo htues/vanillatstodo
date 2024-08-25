@@ -24,6 +24,19 @@
   .task-container {
     @apply mt-4;
   }
+
+  .task-container ul {
+    @apply list-none p-0;
+  }
+  
+  .task-container li {
+    @apply flex justify-between items-center p-2 border-b border-gray-300;
+  }
+  
+  .task-container li button {
+    @apply bg-red-500 text-white p-1 rounded;
+  }
+
   .count {
     @apply text-center p-2 mt-4;
   }
