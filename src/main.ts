@@ -13,9 +13,6 @@ const newTodoInput = document.getElementById('new-todo') as HTMLInputElement;
 const addTodoButton = document.getElementById('add-todo')!;
 const heading = document.querySelector('h3.heading')!; // Select the h3 element
 
-console.log('Heading element:', heading);
-console.log('Heading classes:', heading.className);
-
 addTodoButton.addEventListener('click', (event) => {
   event.preventDefault(); 
   const text = newTodoInput.value.trim();
