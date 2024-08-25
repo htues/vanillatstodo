@@ -35,6 +35,14 @@ function toggleComplete(id: number) {
   }
 }
 
+function deleteTodo(id: number) {
+  const index = todos.findIndex(todo => todo.id === id);
+  if (index !== -1) {
+    todos.splice(index, 1);
+    renderTodos();
+  }
+}
+
 function renderTodos() {
   todoList.innerHTML = '';
   todos.forEach(todo => {
@@ -42,6 +50,17 @@ function renderTodos() {
     li.textContent = todo.text;
     li.className = todo.completed ? 'completed' : '';
     li.addEventListener('click', () => toggleComplete(todo.id));
+
+    const deleteButton = document.createElement('button');
+    deleteButton.textContent = 'Delete';
+    deleteButton.className = 'bg-red-500 text-white p-1 rounded';
+    deleteButton.addEventListener('click', (event) => {
+      event.stopPropagation(); // Prevent the click event from toggling the completion
+      deleteTodo(todo.id);
+    });
+
+    li.appendChild(deleteButton);    
+
     todoList.appendChild(li);
   });
 
