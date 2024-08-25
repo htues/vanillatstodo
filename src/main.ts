@@ -23,7 +23,7 @@ addTodoButton.addEventListener('click', (event) => {
 });
 
 function addTodo(todo: Todo) {
-  todos.push(todo);
+  todos.unshift(todo);
   renderTodos();
 }
 
