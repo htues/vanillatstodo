@@ -1,8 +1,12 @@
 import './index.css';
 import { Todo } from './types';
 
-const todos: Todo[] = [];
-let nextId = 1;
+const todos: Todo[] = [
+  { id: 1, text: 'Wake-up', completed: false },
+  { id: 2, text: 'Take a bath', completed: false },
+  { id: 3, text: 'Say your prayers', completed: false }
+];
+let nextId = 4;
 
 const todoList = document.getElementById('todo-list')!;
 const newTodoInput = document.getElementById('new-todo') as HTMLInputElement;
@@ -53,4 +57,5 @@ function renderTodos() {
   }
 }
 
+// Initial render to show the default tasks and message if there are no tasks
 renderTodos();
