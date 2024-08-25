@@ -1,12 +1,45 @@
-import './index.css'
+import './index.css';
+import { Todo } from './types';
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-  <div class="min-h-screen flex items-center justify-center bg-gray-100">
-    <div class="bg-white p-6 rounded-lg shadow-lg text-center">
-      <h1 class="text-4xl font-bold mb-4">Hello World</h1>
-      <p class="text-white font-bold bg-blue-500 p-6 rounded-2xl">
-        Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
-      </p>
-    </div>
-  </div>
-`
+const todos: Todo[] = [];
+let nextId = 1;
+
+const todoList = document.getElementById('todo-list')!;
+const newTodoInput = document.getElementById('new-todo') as HTMLInputElement;
+const addTodoButton = document.getElementById('add-todo')!;
+const heading = document.querySelector('h3.heading')!; // Select the h3 element
+
+console.log('Heading element:', heading);
+console.log('Heading classes:', heading.className);
+
+addTodoButton.addEventListener('click', () => {
+  const text = newTodoInput.value.trim();
+  if (text) {
+    addTodo({ id: nextId++, text, completed: false });
+    newTodoInput.value = '';
+  }
+});
+
+function addTodo(todo: Todo) {
+  todos.push(todo);
+  renderTodos();
+}
+
+function toggleComplete(id: number) {
+  const todo = todos.find(todo => todo.id === id);
+  if (todo) {
+    todo.completed = !todo.completed;
+    renderTodos();
+  }
+}
+
+function renderTodos() {
+  todoList.innerHTML = '';
+  todos.forEach(todo => {
+    const li = document.createElement('li');
+    li.textContent = todo.text;
+    li.className = todo.completed ? 'completed' : '';
+    li.addEventListener('click', () => toggleComplete(todo.id));
+    todoList.appendChild(li);
+  });
+}

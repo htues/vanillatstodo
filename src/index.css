@@ -2,10 +2,6 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
-@import url("https://fonts.googleapis.com/css?family=Montserrat:wght@400,600&display=swap");
-@import url("https://fonts.googleapis.com/css?family=Mulish:wght@200,300,400&display=swap");
-@import url("https://fonts.googleapis.com/css?family=Anton:wght@200,300,400&display=swap");
-
 @layer components {
   .bg {
     @apply h-screen w-screen p-4 bg-gradient-to-r from-[#2F80ED] to-[#1CB5E0];
