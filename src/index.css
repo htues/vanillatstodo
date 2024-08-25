@@ -1,0 +1,26 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@import url("https://fonts.googleapis.com/css?family=Montserrat:wght@400,600&display=swap");
+@import url("https://fonts.googleapis.com/css?family=Mulish:wght@200,300,400&display=swap");
+@import url("https://fonts.googleapis.com/css?family=Anton:wght@200,300,400&display=swap");
+
+@layer components {
+  body {
+    @apply overflow-x-hidden font-sans;
+  }
+  .btn {
+    @apply flex gap-2 items-center justify-center px-4 py-2 rounded-lg font-semibold shadow-md;
+  }
+  .btn.btn-light{
+    @apply bg-white text-gray-500;
+  }
+  .btn.btn-danger{
+    @apply bg-red-600 text-white shadow-red-400/40;
+  }
+
+  .sidebar-item {
+    @apply w-60 text-white h-screen; /* Reduced width from w-64 to w-60 */
+  }
+}
