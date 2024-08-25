@@ -52,8 +52,8 @@ function renderTodos() {
     li.addEventListener('click', () => toggleComplete(todo.id));
 
     const deleteButton = document.createElement('button');
-    deleteButton.textContent = 'Delete';
     deleteButton.className = 'bg-red-500 text-white p-1 rounded';
+    deleteButton.innerHTML = '<i class="fas fa-trash"></i>';    
     deleteButton.addEventListener('click', (event) => {
       event.stopPropagation(); // Prevent the click event from toggling the completion
       deleteTodo(todo.id);

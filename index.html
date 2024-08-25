@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Todo App</title>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css">
   <style>
     .bg {
       @apply h-screen w-screen p-4 bg-gradient-to-r from-[#2F80ED] to-[#1CB5E0];
@@ -50,9 +51,7 @@
     <form id="todo-form" class="form">
       <input id="new-todo" class="input" type="text" placeholder="Add a Task">
       <button id="add-todo" class="button">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-        </svg>
+        <i class="fas fa-plus"></i>
       </button>
     </form>
     <div class="task-container">
