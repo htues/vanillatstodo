@@ -9,10 +9,12 @@ const newTodoInput = document.getElementById('new-todo') as HTMLInputElement;
 const addTodoButton = document.getElementById('add-todo')!;
 const heading = document.querySelector('h3.heading')!; // Select the h3 element
 
+// Log the heading element and its classes
 console.log('Heading element:', heading);
 console.log('Heading classes:', heading.className);
 
-addTodoButton.addEventListener('click', () => {
+addTodoButton.addEventListener('click', (event) => {
+  event.preventDefault(); // Prevent form submission
   const text = newTodoInput.value.trim();
   if (text) {
     addTodo({ id: nextId++, text, completed: false });
