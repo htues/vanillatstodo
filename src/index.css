@@ -8,17 +8,12 @@
   }
   .container {
     @apply bg-slate-100 max-w-[500px] w-full m-auto rounded-md shadow-xl p-4;
-    max-width: 500px; /* Ensure max-width is set */
-    width: 100%; /* Ensure width is set */
-    margin: 0 auto; /* Center the container */
-    padding: 1rem; /* Add padding */
-    box-sizing: border-box; /* Ensure padding is included in the width */
   }
   .heading {
     @apply text-3xl font-bold text-center text-gray-800 p-2;
   }
   .form {
-    @apply flex justify-between;
+    @apply flex justify-between mt-4;
   }
   .input {
     @apply border p-2 w-full text-xl;
@@ -26,8 +21,11 @@
   .button {
     @apply border p-4 ml-2 bg-purple-500 text-slate-100;
   }
+  .task-container {
+    @apply mt-4;
+  }
   .count {
-    @apply text-center p-2;
+    @apply text-center p-2 mt-4;
   }
   .completed {
     text-decoration: line-through;
