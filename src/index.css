@@ -13,14 +13,17 @@
     @apply text-3xl font-bold text-center text-gray-800 p-2;
   }
   .form {
-    @apply flex justify-between mt-4;
+    @apply flex justify-between;
   }
+  
   .input {
     @apply border p-2 w-full text-xl;
   }
+  
   .button {
     @apply border p-4 ml-2 bg-purple-500 text-slate-100;
   }
+  
   .task-container {
     @apply mt-4;
   }
@@ -30,17 +33,18 @@
   }
   
   .task-container li {
-    @apply flex justify-between items-center p-2 border-b border-gray-300;
+    @apply flex justify-between items-center p-2 border-b border-gray-300 hover:cursor-pointer;
   }
   
   .task-container li button {
     @apply bg-red-500 text-white p-1 rounded;
   }
-
+  
   .count {
     @apply text-center p-2 mt-4;
   }
+  
   .completed {
-    text-decoration: line-through;
+    @apply line-through;
   }
 }
