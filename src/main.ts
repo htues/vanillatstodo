@@ -44,4 +44,13 @@ function renderTodos() {
     li.addEventListener('click', () => toggleComplete(todo.id));
     todoList.appendChild(li);
   });
+
+  const todoCount = document.getElementById('todo-count')!;
+  if (todos.length === 0) {
+    todoCount.textContent = "You don't have any tasks";
+  } else {
+    todoCount.textContent = `You have ${todos.length} task(s)`;
+  }
 }
+
+renderTodos();
