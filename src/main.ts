@@ -53,7 +53,8 @@ function renderTodos() {
   if (todos.length === 0) {
     todoCount.textContent = "You don't have any tasks";
   } else {
-    todoCount.textContent = `You have ${todos.length} task(s)`;
+    const completedCount = todos.filter(todo => todo.completed).length;
+    todoCount.textContent = `You have ${todos.length} task(s), ${completedCount} completed`;
   }
 }
 
