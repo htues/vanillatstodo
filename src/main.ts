@@ -11,7 +11,6 @@ let nextId = 4;
 const todoList = document.getElementById('todo-list')!;
 const newTodoInput = document.getElementById('new-todo') as HTMLInputElement;
 const addTodoButton = document.getElementById('add-todo')!;
-const heading = document.querySelector('h3.heading')!; // Select the h3 element
 
 addTodoButton.addEventListener('click', (event) => {
   event.preventDefault(); 
@@ -55,7 +54,7 @@ function renderTodos() {
     deleteButton.className = 'bg-red-500 text-white p-1 rounded';
     deleteButton.innerHTML = '<i class="fas fa-trash"></i>';    
     deleteButton.addEventListener('click', (event) => {
-      event.stopPropagation(); // Prevent the click event from toggling the completion
+      event.stopPropagation(); 
       deleteTodo(todo.id);
     });
 
