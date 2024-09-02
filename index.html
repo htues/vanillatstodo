@@ -1,13 +1,26 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + TS</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Todo App</title>
+  <link rel="stylesheet" href="src/index.css">
+  <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css">
+</head>
+<body class="bg">
+  <div class="container">
+    <h3 class="heading">ToDo App</h3>
+    <form id="todo-form" class="form">
+      <input id="new-todo" class="input" type="text" placeholder="Add a Task">
+      <button id="add-todo" class="button">
+        <i class="fas fa-plus"></i>
+      </button>
+    </form>
+    <div class="task-container">
+      <ul id="todo-list"></ul>
+    </div>
+    <p id="todo-count" class="count"></p>
+  </div>
+  <script type="module" src="src/main.ts"></script>
+</body>
 </html>
