@@ -9,3 +9,15 @@ This application is a good starting point to a React.JS based version to extend 
 1. Clean code
 2. SOLID principles
 3. Introducing state management.
+
+## How to run the project:
+
+### Bare metal:
+
+1. Clone this repo
+2. npm run dev
+3. Open your browser and type this URI: http://localhost:5173
+
+![running in bare metal](sshots/baremetal.png)
+
+### Using docker image:
