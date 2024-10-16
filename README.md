@@ -15,9 +15,17 @@ This application is a good starting point to a React.JS based version to extend 
 ### Bare metal:
 
 1. Clone this repo
-2. npm run dev
+2. yarn run dev
 3. Open your browser and type this URI: http://localhost:5173
 
 ![running in bare metal](sshots/baremetal.png)
 
 ### Using docker image:
+
+1. Clone this repo
+2. Open the Dockerfile and follow the instuctions at the end
+3. after spinning up the container open your browser and type this URI: http://localhost:9090
+
+![spinning up the container](sshots/docker01.png)
+
+![accessing the application](sshots/docker02.png)
