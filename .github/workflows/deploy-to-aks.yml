@@ -1,0 +1,82 @@
+name: Deploy to AKS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Install kubelogin
+      run: |
+        az aks install-cli
+
+    - name: Create AKS Cluster
+      run: |
+          az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
+
+    - name: Get AKS Credentials
+      run: |
+        az aks get-credentials --resource-group vanillatstodogroup --name vanillatstodocluster --admin
+
+    - name: Configure kubelogin
+      run: |
+        kubelogin convert-kubeconfig -l azurecli
+
+    - name: Verify Kubernetes Context
+      run: |
+        kubectl config current-context
+
+    - name: Print Kubernetes Configuration
+      run: |
+        kubectl config view
+
+    - name: Create Docker Hub Secret
+      run: |
+        kubectl create secret docker-registry regcred \
+          --docker-server=https://index.docker.io/v1/ \
+          --docker-username=${{ secrets.DOCKER_HUB_USERNAME }} \
+          --docker-password=${{ secrets.DOCKER_HUB_PAT }} \
+          --docker-email=${{ secrets.DOCKER_HUB_EMAIL }}
+
+    - name: Login to Docker Hub
+      run: |
+        echo ${{ secrets.DOCKER_HUB_PAT }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
+
+    - name: Pull Docker image
+      run: |
+        docker pull hftamayo/vanillatstodo:0.0.1
+
+    - name: Deploy to AKS
+      uses: azure/k8s-deploy@v1
+      with:
+        manifests: |
+          vanillatstodo_deployment.yaml
+          vanillatstodo_service.yaml
+
+    - name: Wait for Deployment Rollout
+      run: |
+        kubectl rollout status deployment/vanillatstodo --timeout=10m
+
+    - name: List Deployments
+      run: |
+        kubectl get deployments
+
+    - name: Describe Deployment
+      run: |
+        kubectl describe deployment vanillatstodo
+
+    - name: Get Pod Logs
+      run: |
+        kubectl logs -l app=vanillatstodo

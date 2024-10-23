@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vanillatstodo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: vanillatstodo
+  template:
+    metadata:
+      labels:
+        app: vanillatstodo
+    spec:
+      containers:
+      - name: vanillatstodo
+        image: hftamayo/vanillatstodo:0.0.1
+        ports:
+        - containerPort: 80
