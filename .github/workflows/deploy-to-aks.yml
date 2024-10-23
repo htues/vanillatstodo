@@ -18,6 +18,9 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+    - name: Check Azure CLI version
+      run: az --version        
+
     - name: Install kubelogin
       run: |
         az aks install-cli
