@@ -24,11 +24,11 @@ jobs:
 
     - name: Create AKS Cluster
       run: |
-          az aks create --resource-group tstodogroup --name tstodocluster --node-count 1 --enable-addons monitoring --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
+          az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
 
     - name: Get AKS Credentials
       run: |
-        az aks get-credentials --resource-group tstodogroup --name tstodocluster --admin
+        az aks get-credentials --resource-group vanillatstodogroup --name vanillatstodocluster --admin
 
     - name: Configure kubelogin
       run: |
@@ -56,22 +56,18 @@ jobs:
 
     - name: Pull Docker image
       run: |
-        docker pull hftamayo/pgecommerce:0.0.1
+        docker pull hftamayo/vanillatstodo:0.0.1
 
     - name: Deploy to AKS
       uses: azure/k8s-deploy@v1
       with:
         manifests: |
-          pg_deployment.yaml
-          pg_service.yaml
-      env:
-        POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-        POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          vanillatstodo_deployment.yaml
+          vanillatstodo_service.yaml
 
     - name: Wait for Deployment Rollout
       run: |
-        kubectl rollout status deployment/pgdatalayer --timeout=10m
+        kubectl rollout status deployment/vanillatstodo --timeout=10m
 
     - name: List Deployments
       run: |
@@ -79,8 +75,8 @@ jobs:
 
     - name: Describe Deployment
       run: |
-        kubectl describe deployment pgdatalayer
+        kubectl describe deployment vanillatstodo
 
     - name: Get Pod Logs
       run: |
-        kubectl logs -l app=pgdatalayer
+        kubectl logs -l app=vanillatstodo
