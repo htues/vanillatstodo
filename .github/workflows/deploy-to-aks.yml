@@ -21,21 +21,20 @@ jobs:
     - name: Check Azure CLI version
       run: az --version        
 
-    - name: Install kubelogin
+    - name: Extract Service Principal and Client Secret
       run: |
-        az aks install-cli
+        SP_APP_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)
+        CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret)
+        echo "SP_APP_ID=$SP_APP_ID" >> $GITHUB_ENV
+        echo "CLIENT_SECRET=$CLIENT_SECRET" >> $GITHUB_ENV
 
     - name: Create AKS Cluster
       run: |
-          az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
-
+        az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --generate-ssh-keys --service-principal ${{ env.SP_APP_ID }} --client-secret ${{ env.CLIENT_SECRET }} --location westus --node-vm-size "Standard_B2s"
+  
     - name: Get AKS Credentials
       run: |
-        az aks get-credentials --resource-group vanillatstodogroup --name vanillatstodocluster --admin
-
-    - name: Configure kubelogin
-      run: |
-        kubelogin convert-kubeconfig -l azurecli
+        az aks get-credentials --resource-group vanillatstodogroup --name vanillatstodocluster
 
     - name: Verify Kubernetes Context
       run: |
