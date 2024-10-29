@@ -37,7 +37,7 @@ jobs:
     - name: Wait for Log Analytics Workspace to be ready
       run: |
         echo "Waiting for Log Analytics Workspace to be ready..."
-        sleep 300  # Wait for 2 minutes        
+        sleep 120  # Wait for 2 minutes        
 
     - name: Create AKS Cluster
       run: |
@@ -46,7 +46,7 @@ jobs:
     - name: Wait for AKS Cluster to be ready
       run: |
         echo "Waiting for AKS Cluster to be ready..."
-        sleep 600  # Wait for 10 minutes        
+        sleep 120  # Wait for 10 minutes        
 
     - name: Get AKS Credentials
       run: |
@@ -84,8 +84,8 @@ jobs:
       uses: azure/k8s-deploy@v1
       with:
         manifests: |
-          vanillatstodo_deployment.yaml
-          vanillatstodo_service.yaml
+          ../../vanillatstodo_deployment.yaml
+          ../../vanillatstodo_service.yaml
 
     - name: Wait for Deployment Rollout
       run: |
