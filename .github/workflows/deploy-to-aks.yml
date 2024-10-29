@@ -41,7 +41,11 @@ jobs:
 
     - name: Create AKS Cluster
       run: |
-        az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --workspace-resource-id $(az monitor log-analytics workspace show --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --query id -o tsv) --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
+        if az aks show --resource-group vanillatstodogroup --name vanillatstodocluster > /dev/null 2>&1; then
+          echo "AKS Cluster already exists. Skipping creation."
+        else
+          az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --workspace-resource-id $(az monitor log-analytics workspace show --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --query id -o tsv) --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
+        fi
 
     - name: Wait for AKS Cluster to be ready
       run: |
