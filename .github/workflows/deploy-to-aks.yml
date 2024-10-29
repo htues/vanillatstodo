@@ -25,6 +25,10 @@ jobs:
       run: |
         az aks install-cli
 
+    - name: Assign Log Analytics Contributor Role
+      run: |
+        az role assignment create --assignee $(az ad sp show --id http://vanillatstodosp --query appId -o tsv) --role "Log Analytics Contributor" --scope /subscriptions/e8698c35-8189-4f9a-be17-a00cfa7f6c02/resourceGroups/vanillatstodogroup        
+
     - name: Create Log Analytics Workspace
       run: |
         az monitor log-analytics workspace create --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --location westus
