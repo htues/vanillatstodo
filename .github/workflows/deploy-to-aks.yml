@@ -29,9 +29,19 @@ jobs:
       run: |
         az monitor log-analytics workspace create --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --location westus
   
+    - name: Wait for Log Analytics Workspace to be ready
+      run: |
+        echo "Waiting for Log Analytics Workspace to be ready..."
+        sleep 300  # Wait for 2 minutes        
+
     - name: Create AKS Cluster
       run: |
         az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --workspace-resource-id $(az monitor log-analytics workspace show --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --query id -o tsv) --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
+
+    - name: Wait for AKS Cluster to be ready
+      run: |
+        echo "Waiting for AKS Cluster to be ready..."
+        sleep 600  # Wait for 10 minutes        
 
     - name: Get AKS Credentials
       run: |
