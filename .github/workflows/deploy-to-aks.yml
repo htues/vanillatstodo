@@ -31,8 +31,7 @@ jobs:
   
     - name: Create AKS Cluster
       run: |
-       WORKSPACE_ID=$(az monitor log-analytics workspace show --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --query id -o tsv)
-        az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --workspace-resource-id $WORKSPACE_ID --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
+        az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --workspace-resource-id $(az monitor log-analytics workspace show --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --query id -o tsv) --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
 
     - name: Get AKS Credentials
       run: |
