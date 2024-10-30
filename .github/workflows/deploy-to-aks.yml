@@ -146,3 +146,11 @@ jobs:
           echo "Service external IP not available yet. Waiting..."
           sleep 15
         done        
+
+    - name: Create DNS Zone
+      run: |
+        az network dns zone create --resource-group vanillatstodogroup --name vanillatstodo.hftamayo.com
+
+    - name: Create A Record
+      run: |
+        az network dns record-set a add-record --resource-group vanillatstodogroup --zone-name vanillatstodo.hftamayo.com --record-set-name www --ipv4-address $EXTERNAL_IP        
