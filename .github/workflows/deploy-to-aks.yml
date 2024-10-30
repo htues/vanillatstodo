@@ -92,8 +92,8 @@ jobs:
       uses: azure/k8s-deploy@v1
       with:
         manifests: |
-          ../../vanillatstodo_deployment.yaml
-          ../../vanillatstodo_service.yaml
+          vanillatstodo_deployment.yml
+          vanillatstodo_service.yml
 
     - name: Wait for Deployment Rollout
       run: |
