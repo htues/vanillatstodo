@@ -1,5 +1,12 @@
 provider "aws" {
-  region = "us-west-2"
+  region = "us-east-2"
+  default_tags {
+    tags = {
+      Environment = "staging"
+      Project     = "vanillatstodo"
+      ManagedBy   = "terraform"
+    } 
+  } 
 }
 
 # Create VPC
@@ -51,11 +58,18 @@ resource "aws_security_group" "eks" {
   vpc_id = aws_vpc.main.id
 
   ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }  
 
   egress {
     from_port   = 0
@@ -109,10 +123,11 @@ resource "aws_eks_node_group" "main" {
   node_group_name = "standard-workers"
   node_role_arn   = aws_iam_role.eks_node.arn
   subnet_ids      = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
+  instance_types  = ["t3.micro"]
 
   scaling_config {
-    desired_size = 3
-    max_size     = 4
+    desired_size = 2
+    max_size     = 3
     min_size     = 1
   }
 }
