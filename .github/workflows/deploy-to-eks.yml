@@ -3,11 +3,14 @@ name: Deploy to AWS EKS
 on:
   push:
     branches:
-      - unstable
+      - staging
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      TF_WORKSPACE: staging
+      TF_VAR_environment: staging    
 
     steps:
     - name: Checkout repository
@@ -18,7 +21,7 @@ jobs:
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-west-2
+        aws-region: us-east-2
 
     - name: Install kubectl
       run: |
@@ -26,34 +29,9 @@ jobs:
         chmod +x kubectl
         sudo mv kubectl /usr/local/bin/
 
-    - name: Install eksctl
-      run: |
-        curl --silent --location "https://github.com/weaveworks/eksctl/releases/download/0.70.0/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
-        sudo mv /tmp/eksctl /usr/local/bin
-
-    - name: Create EKS Cluster
-      run: |
-        eksctl create cluster \
-          --name vanillatstodo-cluster \
-          --region us-west-2 \
-          --nodegroup-name standard-workers \
-          --node-type t3.medium \
-          --nodes 3 \
-          --nodes-min 1 \
-          --nodes-max 4 \
-          --managed
-
     - name: Update kubeconfig
       run: |
         aws eks update-kubeconfig --name vanillatstodo-cluster --region us-west-2
-
-    - name: Verify Kubernetes Context
-      run: |
-        kubectl config current-context
-
-    - name: Print Kubernetes Configuration
-      run: |
-        kubectl config view
 
     - name: Create Docker Hub Secret
       run: |
@@ -66,7 +44,6 @@ jobs:
             --docker-password=${{ secrets.DOCKER_HUB_PAT }} \
             --docker-email=${{ secrets.DOCKER_HUB_EMAIL }}
         fi
-
 
     - name: Login to Docker Hub
       run: |
@@ -85,18 +62,6 @@ jobs:
       run: |
         kubectl rollout status deployment/vanillatstodo --timeout=10m
 
-    - name: List Deployments
-      run: |
-        kubectl get deployments
-
-    - name: Describe Deployment
-      run: |
-        kubectl describe deployment vanillatstodo
-
-    - name: Get Pod Logs
-      run: |
-        kubectl logs -l app=vanillatstodo
-
     - name: Get Service Public IP
       run: |
         echo "Waiting for service to get an external IP..."
@@ -110,6 +75,20 @@ jobs:
           echo "Service external IP not available yet. Waiting..."
           sleep 15
         done
+
+    - name: Notify on Completion
+      if: always()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const message = `Deployment ${context.job.status}
+          Service available at: ${process.env.EXTERNAL_IP}`
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: message
+          })        
 
     # - name: Create Route 53 Record
     #   run: |
