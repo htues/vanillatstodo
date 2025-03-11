@@ -1,7 +1,7 @@
 name: Destroy Infrastructure
 
 on:
-  workflow_dispatch: # Allows manual triggering of the workflow
+  workflow_dispatch:
 
 jobs:
   destroy:
@@ -14,6 +14,9 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v1
+
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
       with:
@@ -21,33 +24,41 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-2
 
-    - name: Set up Terraform
-      uses: hashicorp/setup-terraform@v1
-
     - name: Initialize Terraform
       working-directory: ./terraform
       run: |
         terraform init \
+          -backend=true \
           -backend-config="bucket=vanillatstodo-terraform-state" \
           -backend-config="key=staging/terraform.tfstate" \
-          -backend-config="region=us-east-2"
+          -backend-config="region=us-east-2" \
+          -backend-config="dynamodb_table=vanillatstodo-terraform-state-lock"
 
     - name: Plan Destroy
       working-directory: ./terraform
-      run: terraform plan -destroy
+      timeout-minutes: 15
+      run: terraform plan -destroy -out=destroy.tfplan
+
+    - name: Confirm Destruction
+      run: |
+        echo "⚠️ This will destroy all resources in the staging environment!"
+        echo "Waiting for 30 seconds before proceeding..."
+        sleep 30
 
     - name: Destroy Infrastructure
       working-directory: ./terraform
       timeout-minutes: 30
       continue-on-error: false
-      run: terraform destroy -auto-approve
+      run: terraform apply "destroy.tfplan"
 
     - name: Notify on Completion
       if: always()
       uses: actions/github-script@v6
       with:
         script: |
-          const message = `Infrastructure destruction ${context.job.status}`
+          const message = `Infrastructure destruction ${context.job.status}
+          Environment: ${process.env.TF_WORKSPACE}
+          Timestamp: ${new Date().toISOString()}`
           github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
