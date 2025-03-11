@@ -58,19 +58,24 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" 
 # Create VPC
 resource "aws_vpc" "main" {
   cidr_block = "10.0.0.0/16"
+
+ tags = {
+    Name        = "vanillatstodo-vpc"
+    Environment = "staging"
+  }  
 }
 
 # Create Subnets
 resource "aws_subnet" "subnet_a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.1.0/24"
-  availability_zone = "us-west-2a"
+  availability_zone = "us-east-2a"
 }
 
 resource "aws_subnet" "subnet_b" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.2.0/24"
-  availability_zone = "us-west-2b"
+  availability_zone = "us-east-2b"
 }
 
 # Create Internet Gateway
