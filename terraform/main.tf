@@ -83,6 +83,11 @@ resource "aws_subnet" "subnet_b" {
 # Create Internet Gateway
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name        = "vanillatstodo-igw"
+    Environment = "staging"
+  }
 }
 
 # Create Route Table
@@ -93,6 +98,11 @@ resource "aws_route_table" "main" {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.main.id
   }
+
+  tags = {
+    Name        = "vanillatstodo-rt"
+    Environment = "staging"
+  }  
 }
 
 # Associate Subnets with Route Table
@@ -130,6 +140,23 @@ resource "aws_security_group" "eks" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  tags = {
+    Name        = "vanillatstodo-eks-sg"
+    Environment = "staging"
+  }  
+}
+
+# Enable CloudWatch logging for EKS cluster
+resource "aws_cloudwatch_log_group" "eks" {
+  name              = "/aws/eks/vanillatstodo-cluster/cluster"
+  retention_in_days = 7
+
+  tags = {
+    Environment = "staging"
+    Project     = "vanillatstodo"
+    ManagedBy   = "terraform"
+  }
 }
 
 # Create EKS Cluster
@@ -137,9 +164,16 @@ resource "aws_eks_cluster" "main" {
   name     = "vanillatstodo-cluster"
   role_arn = aws_iam_role.eks_cluster.arn
 
+   enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
   vpc_config {
     subnet_ids = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
   }
+
+ depends_on = [
+    aws_cloudwatch_log_group.eks,
+    aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy
+  ]
 }
 
 # Create IAM Role for EKS Cluster
@@ -182,6 +216,11 @@ resource "aws_eks_node_group" "main" {
     desired_size = 2
     max_size     = 3
     min_size     = 1
+  }
+
+  tags = {
+    Name        = "vanillatstodo-node-group"
+    Environment = "staging"
   }
 }
 
