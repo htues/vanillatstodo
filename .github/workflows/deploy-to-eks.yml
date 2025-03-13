@@ -1,13 +1,17 @@
 name: Deploy to AWS EKS
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Deploy Infrastructure"]
+    types:
+      - completed
     branches:
       - staging
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     env:
       TF_WORKSPACE: staging
       TF_VAR_environment: staging    
