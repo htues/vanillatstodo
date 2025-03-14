@@ -3,7 +3,7 @@ name: Deploy to AKS
 on:
   push:
     branches:
-      - main
+      - staging
 
 jobs:
   deploy:
@@ -37,7 +37,15 @@ jobs:
     - name: Wait for Log Analytics Workspace to be ready
       run: |
         echo "Waiting for Log Analytics Workspace to be ready..."
-        sleep 120  # Wait for 2 minutes        
+        for i in {1..10}; do
+          WORKSPACE_STATUS=$(az monitor log-analytics workspace show --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --query "provisioningState" -o tsv)
+          if [ "$WORKSPACE_STATUS" == "Succeeded" ]; then
+            echo "Log Analytics Workspace is ready."
+            break
+          fi
+          echo "Log Analytics Workspace is not ready yet. Waiting..."
+          sleep 30
+        done
 
     - name: Create AKS Cluster
       run: |
@@ -50,11 +58,26 @@ jobs:
     - name: Wait for AKS Cluster to be ready
       run: |
         echo "Waiting for AKS Cluster to be ready..."
-        sleep 120  # Wait for 10 minutes        
+        for i in {1..20}; do
+          CLUSTER_STATUS=$(az aks show --resource-group vanillatstodogroup --name vanillatstodocluster --query "provisioningState" -o tsv)
+          if [ "$CLUSTER_STATUS" == "Succeeded" ]; then
+            echo "AKS Cluster is ready."
+            break
+          fi
+          echo "AKS Cluster is not ready yet. Waiting..."
+          sleep 30
+        done
 
     - name: Get AKS Credentials
       run: |
         az aks get-credentials --resource-group vanillatstodogroup --name vanillatstodocluster --admin
+
+    - name: Set AKS Context
+      uses: azure/aks-set-context@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        resource-group: vanillatstodogroup
+        cluster-name: vanillatstodocluster
 
     - name: Configure kubelogin
       run: |
@@ -110,3 +133,24 @@ jobs:
     - name: Get Pod Logs
       run: |
         kubectl logs -l app=vanillatstodo
+
+    - name: Get Service Public IP
+      run: |
+        echo "Waiting for service to get an external IP..."
+        for i in {1..20}; do
+          EXTERNAL_IP=$(kubectl get svc vanillatstodo -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          if [ -n "$EXTERNAL_IP" ]; then
+            echo "Service is available at: $EXTERNAL_IP"
+            break
+          fi
+          echo "Service external IP not available yet. Waiting..."
+          sleep 15
+        done        
+
+    - name: Create DNS Zone
+      run: |
+        az network dns zone create --resource-group vanillatstodogroup --name vanillatstodo.hftamayo.com
+
+    - name: Create A Record
+      run: |
+        az network dns record-set a add-record --resource-group vanillatstodogroup --zone-name vanillatstodo.hftamayo.com --record-set-name www --ipv4-address $EXTERNAL_IP        

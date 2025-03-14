@@ -1,0 +1,112 @@
+name: Deploy to AWS EKS
+
+on:
+  workflow_run:
+    workflows: ["Deploy Infrastructure"]
+    types:
+      - completed
+    branches:
+      - staging
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    env:
+      TF_WORKSPACE: staging
+      TF_VAR_environment: staging    
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-2
+
+    - name: Install kubectl
+      run: |
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        sudo mv kubectl /usr/local/bin/
+
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig --name vanillatstodo-cluster --region us-west-2
+
+    - name: Create Docker Hub Secret
+      run: |
+        if kubectl get secret regcred > /dev/null 2>&1; then
+          echo "Docker Hub Secret already exists. Skipping creation."
+        else
+          kubectl create secret docker-registry regcred \
+            --docker-server=https://index.docker.io/v1/ \
+            --docker-username=${{ secrets.DOCKER_HUB_USERNAME }} \
+            --docker-password=${{ secrets.DOCKER_HUB_PAT }} \
+            --docker-email=${{ secrets.DOCKER_HUB_EMAIL }}
+        fi
+
+    - name: Login to Docker Hub
+      run: |
+        echo ${{ secrets.DOCKER_HUB_PAT }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
+
+    - name: Pull Docker image
+      run: |
+        docker pull hftamayo/vanillatstodo:0.0.1
+
+    - name: Deploy to EKS
+      run: |
+        kubectl apply -f k8s/vanillatstodo_deployment.yaml
+        kubectl apply -f k8s/vanillatstodo_service.yaml
+
+    - name: Wait for Deployment Rollout
+      run: |
+        kubectl rollout status deployment/vanillatstodo --timeout=10m
+
+    - name: Get Service Public IP
+      run: |
+        echo "Waiting for service to get an external IP..."
+        for i in {1..20}; do
+          EXTERNAL_IP=$(kubectl get svc vanillatstodo -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          if [ -n "$EXTERNAL_IP" ]; then
+            echo "Service is available at: $EXTERNAL_IP"
+            echo "::set-output name=external_ip::$EXTERNAL_IP"
+            break
+          fi
+          echo "Service external IP not available yet. Waiting..."
+          sleep 15
+        done
+
+    - name: Notify on Completion
+      if: always()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const message = `Deployment ${context.job.status}
+          Service available at: ${process.env.EXTERNAL_IP}`
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: message
+          })        
+
+    # - name: Create Route 53 Record
+    #   run: |
+    #     aws route53 change-resource-record-sets --hosted-zone-id <YOUR_HOSTED_ZONE_ID> --change-batch '{
+    #       "Changes": [{
+    #         "Action": "UPSERT",
+    #         "ResourceRecordSet": {
+    #           "Name": "www.vanillatstodo.hftamayo.com",
+    #           "Type": "A",
+    #           "AliasTarget": {
+    #             "HostedZoneId": "Z35SXDOTRQ7X7K",
+    #             "DNSName": "$EXTERNAL_IP",
+    #             "EvaluateTargetHealth": false
+    #           }
+    #         }
+    #       }]
+    #     }'        
