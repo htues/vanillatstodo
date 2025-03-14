@@ -103,11 +103,17 @@ jobs:
       with:
         script: |
           const message = `Infrastructure deployment ${context.job.status}
-          - EKS Cluster: ${process.env.EKS_CLUSTER_NAME}
-          - VPC: ${process.env.VPC_ID}`
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: message
-          })      
+          Environment: ${process.env.TF_WORKSPACE}
+          Timestamp: ${new Date().toISOString()}`;
+          
+          console.log(message);
+          
+          // Only try to create comment if running from a PR
+          if (context.payload.pull_request) {
+            await github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });
+          } 
