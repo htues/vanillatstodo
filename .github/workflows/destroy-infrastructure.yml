@@ -58,10 +58,16 @@ jobs:
         script: |
           const message = `Infrastructure destruction ${context.job.status}
           Environment: ${process.env.TF_WORKSPACE}
-          Timestamp: ${new Date().toISOString()}`
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: message
-          })
+          Timestamp: ${new Date().toISOString()}`;
+          
+          console.log(message);
+          
+          // Only try to create comment if running from a PR
+          if (context.payload.pull_request) {
+            await github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });
+          }
