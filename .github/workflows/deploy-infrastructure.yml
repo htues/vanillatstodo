@@ -20,7 +20,7 @@ jobs:
       uses: hashicorp/setup-terraform@v1
       with:
             terraform_version: "1.7.0"  # Specify your desired version
-            cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+            terraform_wrapper: false
 
     - name: Format Terraform Code
       working-directory: ./terraform
