@@ -86,13 +86,19 @@ jobs:
       with:
         script: |
           const message = `Deployment ${context.job.status}
-          Service available at: ${process.env.EXTERNAL_IP}`
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: message
-          })        
+          Service available at: ${process.env.EXTERNAL_IP}`;
+          
+          console.log(message);
+          
+          // Only try to create comment if running from a PR
+          if (context.payload.pull_request) {
+            await github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });
+          }
 
     # - name: Create Route 53 Record
     #   run: |
