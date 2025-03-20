@@ -1,3 +1,17 @@
 #!/bin/bash
-docker compose run --rm terraform terraform fmt -recursive
-docker compose run --rm terraform terraform fmt -check -diff
+
+case "$1" in
+  "fmt")
+    docker exec tf-dev terraform fmt -recursive
+    ;;
+  "validate")
+    docker exec tf-dev terraform validate
+    ;;
+  "plan")
+    docker exec tf-dev terraform plan
+    ;;
+  *)
+    echo "Usage: $0 {fmt|validate|plan}"
+    exit 1
+    ;;
+esac
