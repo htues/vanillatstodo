@@ -5,15 +5,15 @@ provider "aws" {
       Environment = "staging"
       Project     = "vanillatstodo"
       ManagedBy   = "terraform"
-    } 
-  } 
+    }
+  }
 }
 
 # Create DynamoDB table for state locking
 resource "aws_dynamodb_table" "terraform_state_lock" {
-  name           = "vanillatstodo-terraform-state-lock"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "LockID"
+  name         = "vanillatstodo-terraform-state-lock"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
 
   attribute {
     name = "LockID"
@@ -59,24 +59,24 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" 
 resource "aws_vpc" "main" {
   cidr_block = "10.0.0.0/16"
 
- tags = {
+  tags = {
     Name        = "vanillatstodo-vpc"
     Environment = "staging"
-  }  
+  }
 }
 
 # Create Subnets
 resource "aws_subnet" "subnet_a" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.1.0/24"
-  availability_zone = "us-east-2a"
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "us-east-2a"
   map_public_ip_on_launch = true
 }
 
 resource "aws_subnet" "subnet_b" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.2.0/24"
-  availability_zone = "us-east-2b"
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.2.0/24"
+  availability_zone       = "us-east-2b"
   map_public_ip_on_launch = true
 }
 
@@ -102,7 +102,7 @@ resource "aws_route_table" "main" {
   tags = {
     Name        = "vanillatstodo-rt"
     Environment = "staging"
-  }  
+  }
 }
 
 # Associate Subnets with Route Table
@@ -132,7 +132,7 @@ resource "aws_security_group" "eks" {
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-  }  
+  }
 
   egress {
     from_port   = 0
@@ -144,7 +144,7 @@ resource "aws_security_group" "eks" {
   tags = {
     Name        = "vanillatstodo-eks-sg"
     Environment = "staging"
-  }  
+  }
 }
 
 # Enable CloudWatch logging for EKS cluster
@@ -164,13 +164,13 @@ resource "aws_eks_cluster" "main" {
   name     = "vanillatstodo-cluster"
   role_arn = aws_iam_role.eks_cluster.arn
 
-   enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
   vpc_config {
     subnet_ids = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
   }
 
- depends_on = [
+  depends_on = [
     aws_cloudwatch_log_group.eks,
     aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy
   ]
