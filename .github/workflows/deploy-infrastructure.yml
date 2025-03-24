@@ -16,6 +16,19 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-2      
+
+    - name: Setup Infrastructure Prerequisites
+      run: |
+        chmod +x ./devops/scripts/infra-manager.sh        
+        ./devops/scripts/infra-manager.sh clean        
+        ./devops/scripts/infra-manager.sh check
+
     - name: Set up Terraform
       uses: hashicorp/setup-terraform@v1
       with:
@@ -23,10 +36,8 @@ jobs:
             terraform_wrapper: false
 
     - name: Format Terraform Code
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       run: |
-        pwd
-        ls -la
         terraform version
         terraform fmt -check -diff
         terraform fmt -recursive -check
@@ -78,7 +89,7 @@ jobs:
           --create-bucket-configuration LocationConstraint=us-east-2        
 
     - name: Initialize Terraform
-      working-directory: ./terraform    
+      working-directory: ./devops/terraform    
       run: |
         terraform init \
           -backend-config="bucket=vanillatstodo-terraform-state" \
@@ -86,21 +97,21 @@ jobs:
           -backend-config="region=us-east-2"
 
     - name: Validate Terraform
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       run: terraform validate
 
     - name: Plan Terraform
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       run: terraform plan
 
     - name: Apply Terraform
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       timeout-minutes: 30
       continue-on-error: false
       run: terraform apply -auto-approve
 
     - name: Capture Terraform Outputs
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       run: |
         echo "EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name)" >> $GITHUB_ENV
         echo "VPC_ID=$(terraform output -raw vpc_id)" >> $GITHUB_ENV
