@@ -26,7 +26,6 @@ jobs:
     - name: Setup Infrastructure Prerequisites
       run: |
         chmod +x ./devops/scripts/infra-manager.sh        
-        ./devops/scripts/infra-manager.sh clean        
         ./devops/scripts/infra-manager.sh check
 
     - name: Set up Terraform
