@@ -36,7 +36,7 @@ jobs:
             terraform_wrapper: false
 
     - name: Format Terraform Code
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       run: |
         terraform version
         terraform fmt -check -diff
@@ -89,7 +89,7 @@ jobs:
           --create-bucket-configuration LocationConstraint=us-east-2        
 
     - name: Initialize Terraform
-      working-directory: ./terraform    
+      working-directory: ./devops/terraform    
       run: |
         terraform init \
           -backend-config="bucket=vanillatstodo-terraform-state" \
@@ -97,21 +97,21 @@ jobs:
           -backend-config="region=us-east-2"
 
     - name: Validate Terraform
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       run: terraform validate
 
     - name: Plan Terraform
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       run: terraform plan
 
     - name: Apply Terraform
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       timeout-minutes: 30
       continue-on-error: false
       run: terraform apply -auto-approve
 
     - name: Capture Terraform Outputs
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       run: |
         echo "EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name)" >> $GITHUB_ENV
         echo "VPC_ID=$(terraform output -raw vpc_id)" >> $GITHUB_ENV

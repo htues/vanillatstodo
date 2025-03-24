@@ -25,7 +25,7 @@ jobs:
         aws-region: us-east-2
 
     - name: Initialize Terraform
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       run: |
         terraform init \
           -backend=true \
@@ -35,7 +35,7 @@ jobs:
           -backend-config="dynamodb_table=vanillatstodo-terraform-state-lock"
 
     - name: Plan Destroy
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       timeout-minutes: 15
       run: terraform plan -destroy -out=destroy.tfplan
 
@@ -46,7 +46,7 @@ jobs:
         sleep 30
 
     - name: Destroy Infrastructure
-      working-directory: ./terraform
+      working-directory: ./devops/terraform
       timeout-minutes: 30
       continue-on-error: false
       run: terraform apply "destroy.tfplan"
