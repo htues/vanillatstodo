@@ -2,20 +2,38 @@ name: Destroy Infrastructure
 
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        default: 'staging'
+      confirmation:
+        description: 'Type "DESTROY" to confirm'
+        required: true
 
 jobs:
   destroy:
     runs-on: ubuntu-latest
     env:
-      TF_WORKSPACE: staging
-      TF_VAR_environment: staging    
+      TF_WORKSPACE: ${{ github.event.inputs.environment }}
+      TF_VAR_environment: ${{ github.event.inputs.environment }}
+
+    if: github.event.inputs.confirmation == 'DESTROY'
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v2
 
+    - name: Verify Prerequisites
+      run: |
+        chmod +x ./devops/scripts/infra-manager.sh
+        ./devops/scripts/infra-manager.sh verify
+
     - name: Set up Terraform
       uses: hashicorp/setup-terraform@v1
+      with:
+        terraform_version: "1.7.0"
+        terraform_wrapper: false
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
@@ -24,45 +42,72 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-2
 
+    - name: Backup Terraform State
+      working-directory: ./devops/terraform
+      run: |
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        aws s3 cp s3://vanillatstodo-terraform-state/staging/terraform.tfstate \
+          s3://vanillatstodo-terraform-state/backups/terraform.tfstate.${TIMESTAMP}
+
     - name: Initialize Terraform
       working-directory: ./devops/terraform
-      run: |
-        terraform init \
-          -backend=true \
-          -backend-config="bucket=vanillatstodo-terraform-state" \
-          -backend-config="key=staging/terraform.tfstate" \
-          -backend-config="region=us-east-2" \
-          -backend-config="dynamodb_table=vanillatstodo-terraform-state-lock"
+      run: terraform init
 
     - name: Plan Destroy
+      id: plan
       working-directory: ./devops/terraform
       timeout-minutes: 15
-      run: terraform plan -destroy -out=destroy.tfplan
-
-    - name: Confirm Destruction
       run: |
-        echo "⚠️ This will destroy all resources in the staging environment!"
-        echo "Waiting for 30 seconds before proceeding..."
-        sleep 30
+        terraform plan -destroy -out=destroy.tfplan
+        echo "Resources to be destroyed:"
+        terraform show -json destroy.tfplan | jq -r '.resource_changes[] | select(.change.actions[0] == "delete")'
+
+    - name: Safety Check
+      run: |
+        echo "⚠️ DANGER: About to destroy infrastructure in ${{ github.event.inputs.environment }}"
+        echo "Last chance to cancel (waiting 60 seconds)..."
+        sleep 60
 
     - name: Destroy Infrastructure
       working-directory: ./devops/terraform
       timeout-minutes: 30
       continue-on-error: false
-      run: terraform apply "destroy.tfplan"
+      run: |
+        terraform apply -auto-approve destroy.tfplan || {
+          echo "Destroy failed. Check state and resources manually."
+          exit 1
+        }
+
+    - name: Verify Destruction
+      working-directory: ./devops/terraform
+      run: |
+        # Verify EKS cluster deletion
+        if aws eks describe-cluster --name vanillatstodo-cluster 2>/dev/null; then
+          echo "Error: EKS cluster still exists"
+          exit 1
+        fi
+        
+        # Verify VPC deletion
+        VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=vanillatstodo" --query 'Vpcs[*].VpcId' --output text)
+        if [ ! -z "$VPC_ID" ]; then
+          echo "Error: VPC still exists"
+          exit 1
+        fi
 
     - name: Notify on Completion
       if: always()
       uses: actions/github-script@v6
       with:
         script: |
-          const message = `Infrastructure destruction ${context.job.status}
+          const status = context.job.status;
+          const message = `Infrastructure destruction ${status}
           Environment: ${process.env.TF_WORKSPACE}
-          Timestamp: ${new Date().toISOString()}`;
+          Timestamp: ${new Date().toISOString()}
+          
+          ${status === 'success' ? '✅ All resources destroyed successfully' : '❌ Destroy operation failed'}`;
           
           console.log(message);
           
-          // Only try to create comment if running from a PR
           if (context.payload.pull_request) {
             await github.rest.issues.createComment({
               issue_number: context.payload.pull_request.number,
