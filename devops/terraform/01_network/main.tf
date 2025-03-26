@@ -28,7 +28,7 @@ resource "aws_subnet" "subnet_a" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                        = "vanillatstodo-subnet-a"
+    Name                                        = "vanillatstodo-subnet-a"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 }
@@ -117,10 +117,10 @@ resource "aws_security_group" "eks" {
 resource "aws_eks_cluster" "main" {
   name     = var.cluster_name
   role_arn = aws_iam_role.eks_cluster.arn
-  version  = "1.27"  # Specify Kubernetes version
+  version  = "1.27" # Specify Kubernetes version
 
   vpc_config {
-    subnet_ids = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
+    subnet_ids              = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
     endpoint_private_access = true
     endpoint_public_access  = true
   }
