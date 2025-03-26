@@ -35,39 +35,77 @@ jobs:
             terraform_version: "1.7.0"  # Specify your desired version
             terraform_wrapper: false
 
-    - name: Format and Validate Terraform Code
-      working-directory: ./devops/terraform
+    - name: Deploy State Resources
+      id: state
+      working-directory: ./devops/terraform/00-state
       run: |
+        set -e
+        echo "Deploying state management resources..."
         terraform fmt -check -diff
         terraform init
         terraform validate
-
-    - name: Plan with Cost Estimation
-      id: plan
-      working-directory: ./devops/terraform
-      run: |
         terraform plan -out=tfplan
-        echo "Plan file created at: tfplan"
-        
-        # Show resource changes
-        echo "Planned changes:"
-        terraform show -json tfplan | jq -r '.resource_changes[] | select(.change.actions[] != "no-op")'
+        terraform apply -auto-approve tfplan || {
+          echo "State deployment failed"
+          exit 1
+        }
 
-    - name: Apply with Safety Measures
-      working-directory: ./devops/terraform
+    - name: Deploy Network Layer
+      id: network
+      if: success()
+      working-directory: ./devops/terraform/01-network
+      run: |
+        set -e
+        echo "Deploying network infrastructure..."
+        terraform fmt -check -diff
+        terraform init \
+          -backend-config="bucket=vanillatstodo-terraform-state" \
+          -backend-config="key=staging/network.tfstate" \
+          -backend-config="region=us-east-2"
+        terraform validate
+        terraform plan -out=tfplan
+        terraform apply -auto-approve tfplan || {
+          echo "Network deployment failed"
+          exit 1
+        }
+
+    - name: Deploy EKS Cluster
+      id: eks
+      if: success()
+      working-directory: ./devops/terraform/02-eks
       timeout-minutes: 30
       run: |
+        set -e
+        echo "Deploying EKS cluster..."
+        terraform fmt -check -diff
+        terraform init \
+          -backend-config="bucket=vanillatstodo-terraform-state" \
+          -backend-config="key=staging/eks.tfstate" \
+          -backend-config="region=us-east-2"
+        terraform validate
+        terraform plan -out=tfplan
         terraform apply -auto-approve tfplan || {
-          echo "Apply failed, initiating cleanup..."
+          echo "EKS deployment failed"
           terraform destroy -auto-approve
           exit 1
         }
 
-    - name: Verify Deployment
-      if: success()
-      working-directory: ./devops/terraform
+    - name: Deploy Monitoring
+      working-directory: ./devops/terraform/03-monitoring
       run: |
-        # Verify EKS cluster is ready
+        terraform fmt -check -diff
+        terraform init \
+          -backend-config="bucket=vanillatstodo-terraform-state" \
+          -backend-config="key=staging/monitoring.tfstate" \
+          -backend-config="region=us-east-2"
+        terraform validate
+        terraform plan -out=tfplan
+        terraform apply -auto-approve tfplan
+
+    - name: Verify EKS Deployment
+      if: success()
+      working-directory: ./devops/terraform/02-eks
+      run: |
         CLUSTER_STATUS=$(aws eks describe-cluster --name vanillatstodo-cluster --query 'cluster.status' --output text)
         if [ "$CLUSTER_STATUS" != "ACTIVE" ]; then
           echo "Cluster is not active. Status: $CLUSTER_STATUS"
@@ -76,7 +114,7 @@ jobs:
 
     - name: Capture Outputs
       if: success()
-      working-directory: ./devops/terraform
+      working-directory: ./devops/terraform/02-eks
       run: |
         echo "EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name)" >> $GITHUB_ENV
         echo "VPC_ID=$(terraform output -raw vpc_id)" >> $GITHUB_ENV
@@ -102,3 +140,11 @@ jobs:
               body: message
             });
           }
+
+    - name: Deployment Summary
+      if: always()
+      run: |
+        echo "Deployment Status:"
+        echo "State Layer: ${{ steps.state.outcome }}"
+        echo "Network Layer: ${{ steps.network.outcome }}"
+        echo "EKS Layer: ${{ steps.eks.outcome }}"          
