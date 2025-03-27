@@ -2,20 +2,26 @@ name: Destroy Infrastructure
 
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        default: 'staging'
+      confirmation:
+        description: 'Type "DESTROY" to confirm'
+        required: true
 
 jobs:
   destroy:
     runs-on: ubuntu-latest
+    if: github.event.inputs.confirmation == 'DESTROY'
     env:
-      TF_WORKSPACE: staging
-      TF_VAR_environment: staging    
+      TF_WORKSPACE: ${{ github.event.inputs.environment }}
+      TF_VAR_environment: ${{ github.event.inputs.environment }}
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v2
-
-    - name: Set up Terraform
-      uses: hashicorp/setup-terraform@v1
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
@@ -24,50 +30,72 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-2
 
-    - name: Initialize Terraform
-      working-directory: ./devops/terraform
+    - name: Backup Terraform States
+      run: |
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        for state in network eks monitoring; do
+          aws s3 cp \
+            s3://vanillatstodo-terraform-state/staging/${state}.tfstate \
+            s3://vanillatstodo-terraform-state/backups/${state}.tfstate.${TIMESTAMP} || true
+        done
+
+    - name: Destroy Monitoring
+      id: destroy-monitoring
+      working-directory: ./devops/terraform/03-monitoring
       run: |
         terraform init \
-          -backend=true \
           -backend-config="bucket=vanillatstodo-terraform-state" \
-          -backend-config="key=staging/terraform.tfstate" \
-          -backend-config="region=us-east-2" \
-          -backend-config="dynamodb_table=vanillatstodo-terraform-state-lock"
+          -backend-config="key=staging/monitoring.tfstate" \
+          -backend-config="region=us-east-2"
+        terraform destroy -auto-approve || echo "::warning::Monitoring destroy failed"
 
-    - name: Plan Destroy
-      working-directory: ./devops/terraform
-      timeout-minutes: 15
-      run: terraform plan -destroy -out=destroy.tfplan
-
-    - name: Confirm Destruction
-      run: |
-        echo "⚠️ This will destroy all resources in the staging environment!"
-        echo "Waiting for 30 seconds before proceeding..."
-        sleep 30
-
-    - name: Destroy Infrastructure
-      working-directory: ./devops/terraform
+    - name: Destroy EKS Cluster
+      id: destroy-eks
+      working-directory: ./devops/terraform/02-eks
       timeout-minutes: 30
-      continue-on-error: false
-      run: terraform apply "destroy.tfplan"
+      run: |
+        terraform init \
+          -backend-config="bucket=vanillatstodo-terraform-state" \
+          -backend-config="key=staging/eks.tfstate" \
+          -backend-config="region=us-east-2"
+        terraform destroy -auto-approve || echo "::warning::EKS destroy failed"
 
-    - name: Notify on Completion
+    - name: Destroy Network
+      id: destroy-network
+      working-directory: ./devops/terraform/01-network
+      run: |
+        terraform init \
+          -backend-config="bucket=vanillatstodo-terraform-state" \
+          -backend-config="key=staging/network.tfstate" \
+          -backend-config="region=us-east-2"
+        terraform destroy -auto-approve || echo "::warning::Network destroy failed"
+
+    - name: Verify Resources Deleted
+      run: |
+        # Check EKS cluster
+        if aws eks describe-cluster --name vanillatstodo-cluster 2>/dev/null; then
+          echo "::error::EKS cluster still exists"
+          exit 1
+        fi
+        
+        # Check VPC
+        VPC_ID=$(aws ec2 describe-vpcs --filters "Name:tag:Project,Values=vanillatstodo" --query 'Vpcs[*].VpcId' --output text)
+        if [ ! -z "$VPC_ID" ]; then
+          echo "::error::VPC still exists"
+          exit 1
+        fi
+
+    - name: Destroy State Resources
       if: always()
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const message = `Infrastructure destruction ${context.job.status}
-          Environment: ${process.env.TF_WORKSPACE}
-          Timestamp: ${new Date().toISOString()}`;
-          
-          console.log(message);
-          
-          // Only try to create comment if running from a PR
-          if (context.payload.pull_request) {
-            await github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: message
-            });
-          }
+      working-directory: ./devops/terraform/00-state
+      run: |
+        terraform init
+        terraform destroy -auto-approve || echo "::warning::State resources destroy failed"
+
+    - name: Cleanup Summary
+      if: always()
+      run: |
+        echo "Destroy Status:"
+        echo "Monitoring: ${{ steps.destroy-monitoring.outcome }}"
+        echo "EKS: ${{ steps.destroy-eks.outcome }}"
+        echo "Network: ${{ steps.destroy-network.outcome }}"
