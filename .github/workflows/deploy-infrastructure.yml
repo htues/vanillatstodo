@@ -24,6 +24,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
 
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: "1.7.0" # Specify your desired version
+          terraform_wrapper: false
+
       - name: Test IAM Permissions
         run: |
           chmod +x ./devops/scripts/test-aws_permit.sh
@@ -33,12 +39,6 @@ jobs:
         run: |
           chmod +x ./devops/scripts/infra-manager.sh        
           ./devops/scripts/infra-manager.sh verify
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v1
-        with:
-          terraform_version: "1.7.0" # Specify your desired version
-          terraform_wrapper: false
 
       - name: Deploy State Resources
         id: state
