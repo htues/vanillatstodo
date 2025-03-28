@@ -33,7 +33,7 @@ jobs:
       - name: Test IAM Permissions
         run: |
           chmod +x ./devops/scripts/test-aws_permit.sh
-          ./devops/scripts/test-aws_permit.sh
+          ./devops/scripts/test_aws_permit.sh
 
       - name: Setup Infrastructure Prerequisites
         run: |
