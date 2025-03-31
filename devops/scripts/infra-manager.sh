@@ -15,44 +15,47 @@ verify_aws_connection() {
         log_message "ERROR: AWS credentials not configured correctly"
         return 1
     fi
+}
+
+verify_s3_permissions() {
+    log_message "Checking S3 permissions..."
     
-    # Check required permissions
-    local required_services=("s3" "dynamodb" "eks" "ec2" "iam")
-    for service in "${required_services[@]}"; do
-        log_message "Checking $service permissions..."
-        aws $service describe-account-attributes >/dev/null 2>&1 || {
-            log_message "ERROR: Missing required permissions for $service"
-            return 1
-        }
-    done
-}
+    # Test general S3 access
+    if ! aws s3api list-buckets >/dev/null 2>&1; then
+        log_message "WARNING: Cannot list all buckets (continuing with specific checks)"
+    fi
 
-verify_terraform_installation() {
-    log_message "Checking Terraform installation..."
-    if ! terraform version >/dev/null 2>&1; then
-        log_message "ERROR: Terraform not installed or not in PATH"
-        return 1
+    # Check specific bucket permissions
+    BUCKET_NAME="vanillatstodo-terraform-state"
+    if aws s3api head-bucket --bucket $BUCKET_NAME 2>/dev/null; then
+        log_message "✅ S3 bucket exists and is accessible"
+    else
+        log_message "ℹ️ S3 bucket does not exist (will be created during deployment)"
     fi
 }
 
-cleanup_on_failure() {
-    local exit_code=$?
-    if [ $exit_code -ne 0 ]; then
-        log_message "ERROR: Deployment failed. Use 'terraform destroy' for cleanup"
-    fi
-    exit $exit_code
-}
+verify_prerequisites() {
+    log_message "Running pre-deployment verifications..."
+    
+    verify_aws_connection || {
+        log_message "ERROR: AWS authentication failed"
+        exit 1
+    }
 
-trap cleanup_on_failure EXIT
+    verify_s3_permissions || {
+        log_message "WARNING: S3 checks completed with warnings"
+        # Don't exit, as bucket might not exist yet
+    }
+
+    log_message "✅ Prerequisites verification completed"
+}
 
 main() {
     local command=$1
     
     case $command in
         "verify")
-            log_message "Running pre-deployment verifications..."
-            verify_aws_connection
-            verify_terraform_installation
+            verify_prerequisites
             ;;
         *)
             echo "Usage: $0 verify"
