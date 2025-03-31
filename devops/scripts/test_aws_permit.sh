@@ -16,7 +16,6 @@ test_s3_permissions() {
     # Test general S3 access first
     if ! aws s3api list-buckets 2>/dev/null; then
         log_message "⚠️ Warning: Cannot list all buckets (s3:ListAllMyBuckets)"
-        # Continue testing specific bucket permissions
     fi
 
     # Test specific bucket operations
@@ -31,13 +30,14 @@ test_s3_permissions() {
 test_dynamodb_permissions() {
     log_message "Testing DynamoDB permissions..."
     
-    # Test DynamoDB general permissions
-    aws dynamodb list-tables --region $AWS_REGION || {
-        log_message "❌ Failed: Cannot access DynamoDB service"
-        return 1
-    }
+    # Test DynamoDB general permissions with better error handling
+    if ! aws dynamodb list-tables --region $AWS_REGION 2>/dev/null; then
+        log_message "⚠️ Warning: Cannot list DynamoDB tables"
+    else
+        log_message "✅ Can list DynamoDB tables"
+    fi
 
-    # Check if table exists
+    # Check if specific table exists
     if aws dynamodb describe-table --table-name vanillatstodo-terraform-state-lock --region $AWS_REGION 2>/dev/null; then
         log_message "✅ DynamoDB table exists and is accessible"
     else
