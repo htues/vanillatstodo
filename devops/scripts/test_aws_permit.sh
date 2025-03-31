@@ -49,12 +49,17 @@ test_dynamodb_permissions() {
 test_vpc_permissions() {
     log_message "Testing VPC permissions..."
     
-    # Test VPC listing permissions
-    aws ec2 describe-vpcs --region $AWS_REGION || {
-        log_message "❌ Failed: Cannot list VPCs"
+    if ! aws ec2 describe-vpcs --region $AWS_REGION 2>/dev/null; then
+        log_message "❌ Failed: Cannot list VPCs - check EC2 permissions"
         return 1
-    }
-    log_message "✅ VPC permissions OK"
+    fi
+    
+    if ! aws ec2 describe-subnets --region $AWS_REGION 2>/dev/null; then
+        log_message "⚠️ Warning: Cannot list subnets"
+    fi
+    
+    log_message "✅ VPC/EC2 permissions OK"
+    return 0
 }
 
 test_eks_permissions() {
