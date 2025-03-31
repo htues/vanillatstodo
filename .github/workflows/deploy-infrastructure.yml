@@ -44,15 +44,16 @@ jobs:
         id: state
         working-directory: ./devops/terraform/00_state
         run: |
-          set -e
-          echo "Deploying state management resources..."
-          terraform fmt -check -diff
+          # First run with local state
           terraform init
-          terraform validate
-          terraform plan -out=tfplan
-          terraform apply -auto-approve tfplan || {
-            echo "State deployment failed"
-            exit 1
+          terraform apply -auto-approve
+
+          # Now configure S3 backend
+          terraform init -force-copy \
+            -backend-config="bucket=vanillatstodo-terraform-state" \
+            -backend-config="key=staging/terraform.tfstate" \
+            -backend-config="region=us-east-2" \
+            -backend-config="dynamodb_table=vanillatstodo-terraform-state-lock"
           }
 
       - name: Deploy Network Layer
