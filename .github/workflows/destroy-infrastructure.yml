@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment to destroy'
+        description: "Environment to destroy"
         required: true
-        default: 'staging'
+        default: "staging"
       confirmation:
         description: 'Type "DESTROY" to confirm'
         required: true
@@ -20,82 +20,82 @@ jobs:
       TF_VAR_environment: ${{ github.event.inputs.environment }}
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
 
-    - name: Backup Terraform States
-      run: |
-        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-        for state in network eks monitoring; do
-          aws s3 cp \
-            s3://vanillatstodo-terraform-state/staging/${state}.tfstate \
-            s3://vanillatstodo-terraform-state/backups/${state}.tfstate.${TIMESTAMP} || true
-        done
+      - name: Backup Terraform States
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          for state in network eks monitoring; do
+            aws s3 cp \
+              s3://vanillatstodo-terraform-state/staging/${state}.tfstate \
+              s3://vanillatstodo-terraform-state/backups/${state}.tfstate.${TIMESTAMP} || true
+          done
 
-    - name: Destroy Monitoring
-      id: destroy-monitoring
-      working-directory: ./devops/terraform/03-monitoring
-      run: |
-        terraform init \
-          -backend-config="bucket=vanillatstodo-terraform-state" \
-          -backend-config="key=staging/monitoring.tfstate" \
-          -backend-config="region=us-east-2"
-        terraform destroy -auto-approve || echo "::warning::Monitoring destroy failed"
+      - name: Destroy Monitoring
+        id: destroy-monitoring
+        working-directory: ./devops/terraform/03_monitoring
+        run: |
+          terraform init \
+            -backend-config="bucket=vanillatstodo-terraform-state" \
+            -backend-config="key=staging/monitoring.tfstate" \
+            -backend-config="region=us-east-2"
+          terraform destroy -auto-approve || echo "::warning::Monitoring destroy failed"
 
-    - name: Destroy EKS Cluster
-      id: destroy-eks
-      working-directory: ./devops/terraform/02-eks
-      timeout-minutes: 30
-      run: |
-        terraform init \
-          -backend-config="bucket=vanillatstodo-terraform-state" \
-          -backend-config="key=staging/eks.tfstate" \
-          -backend-config="region=us-east-2"
-        terraform destroy -auto-approve || echo "::warning::EKS destroy failed"
+      - name: Destroy EKS Cluster
+        id: destroy-eks
+        working-directory: ./devops/terraform/02_eks
+        timeout-minutes: 30
+        run: |
+          terraform init \
+            -backend-config="bucket=vanillatstodo-terraform-state" \
+            -backend-config="key=staging/eks.tfstate" \
+            -backend-config="region=us-east-2"
+          terraform destroy -auto-approve || echo "::warning::EKS destroy failed"
 
-    - name: Destroy Network
-      id: destroy-network
-      working-directory: ./devops/terraform/01-network
-      run: |
-        terraform init \
-          -backend-config="bucket=vanillatstodo-terraform-state" \
-          -backend-config="key=staging/network.tfstate" \
-          -backend-config="region=us-east-2"
-        terraform destroy -auto-approve || echo "::warning::Network destroy failed"
+      - name: Destroy Network
+        id: destroy-network
+        working-directory: ./devops/terraform/01_network
+        run: |
+          terraform init \
+            -backend-config="bucket=vanillatstodo-terraform-state" \
+            -backend-config="key=staging/network.tfstate" \
+            -backend-config="region=us-east-2"
+          terraform destroy -auto-approve || echo "::warning::Network destroy failed"
 
-    - name: Verify Resources Deleted
-      run: |
-        # Check EKS cluster
-        if aws eks describe-cluster --name vanillatstodo-cluster 2>/dev/null; then
-          echo "::error::EKS cluster still exists"
-          exit 1
-        fi
-        
-        # Check VPC
-        VPC_ID=$(aws ec2 describe-vpcs --filters "Name:tag:Project,Values=vanillatstodo" --query 'Vpcs[*].VpcId' --output text)
-        if [ ! -z "$VPC_ID" ]; then
-          echo "::error::VPC still exists"
-          exit 1
-        fi
+      - name: Verify Resources Deleted
+        run: |
+          # Check EKS cluster
+          if aws eks describe-cluster --name vanillatstodo-cluster 2>/dev/null; then
+            echo "::error::EKS cluster still exists"
+            exit 1
+          fi
 
-    - name: Destroy State Resources
-      if: always()
-      working-directory: ./devops/terraform/00-state
-      run: |
-        terraform init
-        terraform destroy -auto-approve || echo "::warning::State resources destroy failed"
+          # Check VPC
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name:tag:Project,Values=vanillatstodo" --query 'Vpcs[*].VpcId' --output text)
+          if [ ! -z "$VPC_ID" ]; then
+            echo "::error::VPC still exists"
+            exit 1
+          fi
 
-    - name: Cleanup Summary
-      if: always()
-      run: |
-        echo "Destroy Status:"
-        echo "Monitoring: ${{ steps.destroy-monitoring.outcome }}"
-        echo "EKS: ${{ steps.destroy-eks.outcome }}"
-        echo "Network: ${{ steps.destroy-network.outcome }}"
+      - name: Destroy State Resources
+        if: always()
+        working-directory: ./devops/terraform/00_state
+        run: |
+          terraform init
+          terraform destroy -auto-approve || echo "::warning::State resources destroy failed"
+
+      - name: Cleanup Summary
+        if: always()
+        run: |
+          echo "Destroy Status:"
+          echo "Monitoring: ${{ steps.destroy-monitoring.outcome }}"
+          echo "EKS: ${{ steps.destroy-eks.outcome }}"
+          echo "Network: ${{ steps.destroy-network.outcome }}"
