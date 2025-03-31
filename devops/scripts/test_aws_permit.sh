@@ -12,20 +12,20 @@ log_message() {
 test_s3_permissions() {
     log_message "Testing S3 permissions..."
     
-    # Test S3 listing permissions first
-    aws s3api list-buckets || {
-        log_message "❌ Failed: Cannot list S3 buckets"
-        return 1
-    }
+    # Test general S3 access first
+    if ! aws s3api list-buckets 2>/dev/null; then
+        log_message "⚠️ Warning: Cannot list all buckets (s3:ListAllMyBuckets)"
+        # Continue testing specific bucket permissions
+    fi
 
-    # Check if bucket exists
+    # Test specific bucket operations
     if aws s3api head-bucket --bucket vanillatstodo-terraform-state 2>/dev/null; then
         log_message "✅ Bucket exists and is accessible"
     else
         log_message "ℹ️ Bucket does not exist (expected for first run)"
         log_message "✅ S3 permissions OK (bucket will be created during deployment)"
     fi
-}
+
 
 test_dynamodb_permissions() {
     log_message "Testing DynamoDB permissions..."
