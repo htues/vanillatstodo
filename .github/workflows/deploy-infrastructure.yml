@@ -41,20 +41,21 @@ jobs:
           ./devops/scripts/infra-manager.sh verify
 
       - name: Deploy State Resources
-        id: state
-        working-directory: ./devops/terraform/00_state
+        working-directory: devops/terraform/00-state
         run: |
-          # First run with local state
+          # Initialize with local state first
           terraform init
+
+          # Apply state resources
           terraform apply -auto-approve
 
-          # Now configure S3 backend
+          # Configure S3 backend and migrate state
           terraform init -force-copy \
             -backend-config="bucket=vanillatstodo-terraform-state" \
             -backend-config="key=staging/terraform.tfstate" \
             -backend-config="region=us-east-2" \
+            -backend-config="encrypt=true" \
             -backend-config="dynamodb_table=vanillatstodo-terraform-state-lock"
-          }
 
       - name: Deploy Network Layer
         id: network
