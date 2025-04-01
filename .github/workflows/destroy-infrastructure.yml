@@ -1,69 +1,50 @@
-name: Destroy Infrastructure
+---
+name: "Destroy Infrastructure"
 
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: "Environment to destroy"
+      confirmation:
+        description: "Type 'destroy' to confirm"
         required: true
-        default: "staging"
-        type: choice
-        options:
-          - staging
-      confirm_destroy:
-        description: 'Type "destroy" to confirm'
-        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   destroy:
+    name: "Destroy Infrastructure"
     runs-on: ubuntu-latest
-    if: github.event.inputs.confirm_destroy == 'destroy'
-    env:
-      TF_WORKSPACE: ${{ github.event.inputs.environment }}
-      AWS_REGION: us-east-2
+    if: ${{ github.event.inputs.confirmation == 'destroy' }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v1
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: "1.7.0"
-
-      - name: Verify State Resources
-        working-directory: devops/terraform/00-state
-        run: |
-          echo "🔍 Checking state resources..."
-          aws s3 ls s3://vanillatstodo-terraform-state --recursive || true
-          aws dynamodb describe-table --table-name vanillatstodo-terraform-state-lock || true
 
       - name: Destroy Infrastructure
         working-directory: devops/terraform/00-state
         run: |
-          # Remove prevent_destroy temporarily
-          sed -i 's/prevent_destroy = true/prevent_destroy = false/' state_manager.tf
+          echo "🔄 Initializing Terraform..."
+          terraform init
 
-          # Initialize Terraform
-          terraform init \
-            -backend-config="bucket=vanillatstodo-terraform-state" \
-            -backend-config="key=staging/terraform.tfstate" \
-            -backend-config="region=us-east-2" \
-            -backend-config="dynamodb_table=vanillatstodo-terraform-state-lock"
+          echo "💥 Destroying infrastructure..."
+          terraform destroy -auto-approve || {
+            echo "❌ Destroy failed"
+            exit 1
+          }
 
-          # Destroy resources
-          terraform destroy -auto-approve
-
-      - name: Verify Destruction
-        if: success()
-        run: |
-          echo "🔍 Verifying resource deletion..."
-          aws s3 ls s3://vanillatstodo-terraform-state || echo "✅ S3 bucket deleted"
-          aws dynamodb describe-table --table-name vanillatstodo-terraform-state-lock || echo "✅ DynamoDB table deleted"
+          echo "✅ Infrastructure destroyed successfully"
