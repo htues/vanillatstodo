@@ -43,19 +43,21 @@ jobs:
       - name: Deploy State Resources
         working-directory: devops/terraform/00_state
         run: |
-          # Initialize with local state first
+          # First deployment with local state
           terraform init
 
-          # Apply state resources
-          terraform apply -auto-approve
+          # Create state resources
+          terraform plan -out=tfplan
+          terraform apply tfplan
 
-          # Configure S3 backend and migrate state
-          terraform init -force-copy \
+          # Migrate to S3 backend
+          terraform init -migrate-state -force-copy \
             -backend-config="bucket=vanillatstodo-terraform-state" \
             -backend-config="key=staging/terraform.tfstate" \
             -backend-config="region=us-east-2" \
             -backend-config="encrypt=true" \
-            -backend-config="dynamodb_table=vanillatstodo-terraform-state-lock"
+            -backend-config="dynamodb_table=vanillatstodo-terraform-state-lock" \
+            -input=false
 
       - name: Deploy Network Layer
         id: network
