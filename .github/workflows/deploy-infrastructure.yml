@@ -41,7 +41,7 @@ jobs:
           ./devops/scripts/infra-manager.sh verify
 
       - name: Deploy State Resources
-        working-directory: devops/terraform/00-state
+        working-directory: devops/terraform/00_state
         run: |
           # Initialize with local state first
           terraform init
