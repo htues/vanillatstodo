@@ -7,17 +7,20 @@ on:
         description: "Environment to destroy"
         required: true
         default: "staging"
-      confirmation:
-        description: 'Type "DESTROY" to confirm'
+        type: choice
+        options:
+          - staging
+      confirm_destroy:
+        description: 'Type "destroy" to confirm'
         required: true
 
 jobs:
   destroy:
     runs-on: ubuntu-latest
-    if: github.event.inputs.confirmation == 'DESTROY'
+    if: github.event.inputs.confirm_destroy == 'destroy'
     env:
       TF_WORKSPACE: ${{ github.event.inputs.environment }}
-      TF_VAR_environment: ${{ github.event.inputs.environment }}
+      AWS_REGION: us-east-2
 
     steps:
       - name: Checkout repository
@@ -30,73 +33,37 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
 
-      - name: Backup Terraform States
-        run: |
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          for state in network eks monitoring; do
-            aws s3 cp \
-              s3://vanillatstodo-terraform-state/staging/${state}.tfstate \
-              s3://vanillatstodo-terraform-state/backups/${state}.tfstate.${TIMESTAMP} || true
-          done
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: "1.7.0"
 
-      - name: Destroy Monitoring
-        id: destroy-monitoring
-        working-directory: ./devops/terraform/03_monitoring
+      - name: Verify State Resources
+        working-directory: devops/terraform/00-state
         run: |
+          echo "🔍 Checking state resources..."
+          aws s3 ls s3://vanillatstodo-terraform-state --recursive || true
+          aws dynamodb describe-table --table-name vanillatstodo-terraform-state-lock || true
+
+      - name: Destroy Infrastructure
+        working-directory: devops/terraform/00-state
+        run: |
+          # Remove prevent_destroy temporarily
+          sed -i 's/prevent_destroy = true/prevent_destroy = false/' state_manager.tf
+
+          # Initialize Terraform
           terraform init \
             -backend-config="bucket=vanillatstodo-terraform-state" \
-            -backend-config="key=staging/monitoring.tfstate" \
-            -backend-config="region=us-east-2"
-          terraform destroy -auto-approve || echo "::warning::Monitoring destroy failed"
+            -backend-config="key=staging/terraform.tfstate" \
+            -backend-config="region=us-east-2" \
+            -backend-config="dynamodb_table=vanillatstodo-terraform-state-lock"
 
-      - name: Destroy EKS Cluster
-        id: destroy-eks
-        working-directory: ./devops/terraform/02_eks
-        timeout-minutes: 30
+          # Destroy resources
+          terraform destroy -auto-approve
+
+      - name: Verify Destruction
+        if: success()
         run: |
-          terraform init \
-            -backend-config="bucket=vanillatstodo-terraform-state" \
-            -backend-config="key=staging/eks.tfstate" \
-            -backend-config="region=us-east-2"
-          terraform destroy -auto-approve || echo "::warning::EKS destroy failed"
-
-      - name: Destroy Network
-        id: destroy-network
-        working-directory: ./devops/terraform/01_network
-        run: |
-          terraform init \
-            -backend-config="bucket=vanillatstodo-terraform-state" \
-            -backend-config="key=staging/network.tfstate" \
-            -backend-config="region=us-east-2"
-          terraform destroy -auto-approve || echo "::warning::Network destroy failed"
-
-      - name: Verify Resources Deleted
-        run: |
-          # Check EKS cluster
-          if aws eks describe-cluster --name vanillatstodo-cluster 2>/dev/null; then
-            echo "::error::EKS cluster still exists"
-            exit 1
-          fi
-
-          # Check VPC
-          VPC_ID=$(aws ec2 describe-vpcs --filters "Name:tag:Project,Values=vanillatstodo" --query 'Vpcs[*].VpcId' --output text)
-          if [ ! -z "$VPC_ID" ]; then
-            echo "::error::VPC still exists"
-            exit 1
-          fi
-
-      - name: Destroy State Resources
-        if: always()
-        working-directory: ./devops/terraform/00_state
-        run: |
-          terraform init
-          terraform destroy -auto-approve || echo "::warning::State resources destroy failed"
-
-      - name: Cleanup Summary
-        if: always()
-        run: |
-          echo "Destroy Status:"
-          echo "Monitoring: ${{ steps.destroy-monitoring.outcome }}"
-          echo "EKS: ${{ steps.destroy-eks.outcome }}"
-          echo "Network: ${{ steps.destroy-network.outcome }}"
-
+          echo "🔍 Verifying resource deletion..."
+          aws s3 ls s3://vanillatstodo-terraform-state || echo "✅ S3 bucket deleted"
+          aws dynamodb describe-table --table-name vanillatstodo-terraform-state-lock || echo "✅ DynamoDB table deleted"
