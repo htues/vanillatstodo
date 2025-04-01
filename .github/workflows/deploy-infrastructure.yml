@@ -41,23 +41,57 @@ jobs:
           ./devops/scripts/infra-manager.sh verify
 
       - name: Deploy State Resources
-        working-directory: devops/terraform/00_state
+        working-directory: devops/terraform/00-state
         run: |
           # Clean any existing state
           rm -rf .terraform*
 
-          # Initialize with local state
-          terraform init
+          # Initialize Terraform
+          echo "🔄 Initializing Terraform..."
+          terraform init || {
+            echo "❌ Terraform initialization failed"
+            exit 1
+          }
 
-          # Create state resources
-          terraform plan -out=tfplan
-          terraform apply tfplan
+          # Verify existing infrastructure
+          echo "🔍 Verifying existing state infrastructure..."
+          if terraform plan -target=data.aws_s3_bucket.state_bucket -target=data.aws_dynamodb_table.state_lock -detailed-exitcode; then
+            echo "✅ State infrastructure verified"
+            INFRA_EXISTS=true
+          else
+            case $? in
+              1)
+                echo "❌ Terraform plan failed"
+                exit 1
+                ;;
+              2)
+                echo "ℹ️ Creating state infrastructure..."
+                INFRA_EXISTS=false
+                ;;
+            esac
+          fi
 
-          # Wait for S3 bucket to be fully available
-          echo "Waiting for S3 bucket to be available..."
-          sleep 10
+          # Create infrastructure if needed
+          if [ "$INFRA_EXISTS" = "false" ]; then
+            terraform plan -out=tfplan || {
+              echo "❌ Plan creation failed"
+              exit 1
+            }
+            
+            terraform apply tfplan || {
+              echo "❌ Infrastructure creation failed"
+              exit 1
+            }
+            
+            echo "✅ State infrastructure created successfully"
+            
+            # Wait for resources to be fully available
+            echo "⏳ Waiting for resources to be fully available..."
+            sleep 10
+          fi
 
-          # Restore backend configuration
+          # Configure S3 backend
+          echo "🔄 Configuring S3 backend..."
           cat > backend.tf << 'EOF'
           terraform {
             required_version = ">= 1.0.0"
@@ -72,7 +106,13 @@ jobs:
           EOF
 
           # Migrate state to S3
-          terraform init -migrate-state -force-copy
+          echo "🔄 Migrating state to S3..."
+          terraform init -migrate-state -force-copy || {
+            echo "❌ State migration failed"
+            exit 1
+          }
+
+          echo "✅ State deployment completed successfully"
 
       - name: Deploy Network Layer
         id: network
