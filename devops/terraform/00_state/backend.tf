@@ -1,5 +1,5 @@
 terraform {
-  backend "s3" {
-    # Backend configuration will be provided during init
-  }
+  required_version = ">= 1.0.0"
+  
+  backend "s3" {}  # Empty block - configuration will be provided via CLI
 }
