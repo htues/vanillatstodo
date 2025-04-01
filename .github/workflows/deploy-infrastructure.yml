@@ -46,14 +46,32 @@ jobs:
           # Clean any existing state
           rm -rf .terraform*
 
-          # Initialize with local state first
-          terraform init -migrate-state=false
+          # Initialize with local state
+          terraform init
 
           # Create state resources
           terraform plan -out=tfplan
           terraform apply tfplan
 
-          # Migrate to S3 backend
+          # Wait for S3 bucket to be fully available
+          echo "Waiting for S3 bucket to be available..."
+          sleep 10
+
+          # Restore backend configuration
+          cat > backend.tf << 'EOF'
+          terraform {
+            required_version = ">= 1.0.0"
+            backend "s3" {
+              bucket         = "vanillatstodo-terraform-state"
+              key            = "staging/terraform.tfstate"
+              region         = "us-east-2"
+              encrypt        = true
+              dynamodb_table = "vanillatstodo-terraform-state-lock"
+            }
+          }
+          EOF
+
+          # Migrate state to S3
           terraform init -migrate-state -force-copy
 
       - name: Deploy Network Layer
