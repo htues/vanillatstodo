@@ -1,15 +1,15 @@
 # Create VPC with DNS support
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = var.enable_dns
-  enable_dns_support   = var.enable_dns
+  enable_dns_hostnames = true
+  enable_dns_support   = true
 
   tags = {
     Name = "${var.environment}-vanillatstodo-vpc"
   }
 }
 
-# Update subnet configurations with proper tagging for EKS
+# Create public subnets
 resource "aws_subnet" "subnet_a" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = var.subnet_cidrs["subnet_a"]
@@ -17,9 +17,7 @@ resource "aws_subnet" "subnet_a" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                        = "${var.environment}-vanillatstodo-subnet-a"
-    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
-    "Kubernetes:Role:Elb"                       = "1"
+    Name = "${var.environment}-vanillatstodo-subnet-a"
   }
 }
 
@@ -30,9 +28,7 @@ resource "aws_subnet" "subnet_b" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                        = "${var.environment}-vanillatstodo-subnet-b"
-    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
-    "Kubernetes:Role:Elb"                       = "1"
+    Name = "${var.environment}-vanillatstodo-subnet-b"
   }
 }
 
