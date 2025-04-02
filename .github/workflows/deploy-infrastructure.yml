@@ -46,73 +46,19 @@ jobs:
           # Clean any existing state
           rm -rf .terraform*
 
-          # Initialize Terraform
-          echo "🔄 Initializing Terraform..."
-          terraform init || {
-            echo "❌ Terraform initialization failed"
-            exit 1
-          }
-
-          # Verify existing infrastructure
+          # Initialize and verify
+          terraform init
           echo "🔍 Verifying existing state infrastructure..."
-          if terraform plan -target=data.aws_s3_bucket.state_bucket -target=data.aws_dynamodb_table.state_lock -detailed-exitcode; then
-            echo "✅ State infrastructure verified"
-            INFRA_EXISTS=true
+          if terraform plan -target=data.aws_s3_bucket.state_bucket \
+             -target=data.aws_dynamodb_table.state_lock -detailed-exitcode; then
+            echo "✅ State infrastructure exists"
+            terraform output infrastructure_verification
           else
             case $? in
-              1)
-                echo "❌ Terraform plan failed"
-                exit 1
-                ;;
-              2)
-                echo "ℹ️ Creating state infrastructure..."
-                INFRA_EXISTS=false
-                ;;
+              1) echo "❌ Verification failed"; exit 1;;
+              2) echo "Creating state infrastructure...";;
             esac
           fi
-
-          # Create infrastructure if needed
-          if [ "$INFRA_EXISTS" = "false" ]; then
-            terraform plan -out=tfplan || {
-              echo "❌ Plan creation failed"
-              exit 1
-            }
-            
-            terraform apply tfplan || {
-              echo "❌ Infrastructure creation failed"
-              exit 1
-            }
-            
-            echo "✅ State infrastructure created successfully"
-            
-            # Wait for resources to be fully available
-            echo "⏳ Waiting for resources to be fully available..."
-            sleep 10
-          fi
-
-          # Configure S3 backend
-          echo "🔄 Configuring S3 backend..."
-          cat > backend.tf << 'EOF'
-          terraform {
-            required_version = ">= 1.0.0"
-            backend "s3" {
-              bucket         = "vanillatstodo-terraform-state"
-              key            = "staging/terraform.tfstate"
-              region         = "us-east-2"
-              encrypt        = true
-              dynamodb_table = "vanillatstodo-terraform-state-lock"
-            }
-          }
-          EOF
-
-          # Migrate state to S3
-          echo "🔄 Migrating state to S3..."
-          terraform init -migrate-state -force-copy || {
-            echo "❌ State migration failed"
-            exit 1
-          }
-
-          echo "✅ State deployment completed successfully"
 
       - name: Deploy Network Layer
         id: network
