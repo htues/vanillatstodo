@@ -1,22 +1,11 @@
-provider "aws" {
-  region = var.aws_region
-  default_tags {
-    tags = {
-      Environment = var.environment
-      Project     = "vanillatstodo"
-      ManagedBy   = "terraform"
-    }
-  }
-}
-
 # Create VPC with DNS support
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
   enable_dns_support   = true
 
-  tags = {
-    Name = "vanillatstodo-vpc"
+ tags = {
+    Name = "${var.environment}-vanillatstodo-vpc"
   }
 }
 
@@ -28,8 +17,9 @@ resource "aws_subnet" "subnet_a" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                        = "vanillatstodo-subnet-a"
+    Name                                        = "${var.environment}-vanillatstodo-subnet-a"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "Kubernetes:Role:Elb"                       = "1"
   }
 }
 
@@ -40,8 +30,9 @@ resource "aws_subnet" "subnet_b" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                        = "vanillatstodo-subnet-b"
+    Name                                        = "${var.environment}-vanillatstodo-subnet-b"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "Kubernetes:Role:Elb"                       = "1"
   }
 }
 
@@ -49,9 +40,8 @@ resource "aws_subnet" "subnet_b" {
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
-  tags = {
-    Name        = "vanillatstodo-igw"
-    Environment = "staging"
+ tags = {
+    Name = "${var.environment}-vanillatstodo-igw"
   }
 }
 
@@ -64,9 +54,8 @@ resource "aws_route_table" "main" {
     gateway_id = aws_internet_gateway.main.id
   }
 
-  tags = {
-    Name        = "vanillatstodo-rt"
-    Environment = "staging"
+ tags = {
+    Name = "${var.environment}-vanillatstodo-rt"
   }
 }
 
