@@ -1,3 +1,9 @@
+variable "kubernetes_version" {
+  description = "Kubernetes version for EKS cluster"
+  type        = string
+  default     = "1.27"
+}
+
 variable "vpc_id" {
   description = "ID of the VPC where EKS cluster will be created"
   type        = string
