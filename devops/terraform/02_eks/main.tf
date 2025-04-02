@@ -10,6 +10,45 @@ data "aws_subnets" "cluster_subnets" {
   }
 }
 
+# CloudWatch Log Group for EKS
+resource "aws_cloudwatch_log_group" "eks" {
+  name              = "/aws/eks/${var.cluster_name}/cluster"
+  retention_in_days = var.log_retention_days
+
+  tags = {
+    Environment = var.environment
+    Project     = "vanillatstodo"
+  }
+}
+
+# IAM Role for EKS Cluster
+resource "aws_iam_role" "eks_cluster" {
+  name = "${var.environment}-${var.cluster_name}-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "eks.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.environment}-${var.cluster_name}-role"
+  }
+}
+
+# IAM Role Policies for EKS Cluster
+resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  role       = aws_iam_role.eks_cluster.name
+}
+
 # EKS Cluster Security Group
 resource "aws_security_group" "eks_cluster" {
   name        = "${var.environment}-${var.cluster_name}-sg"
