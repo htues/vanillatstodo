@@ -1,12 +1,10 @@
-# Data sources for VPC and Subnets
-data "aws_vpc" "main" {
-  id = var.vpc_id
-}
-
-data "aws_subnets" "cluster_subnets" {
-  filter {
-    name   = "vpc-id"
-    values = [var.vpc_id]
+# Remote State Data Source
+data "terraform_remote_state" "network" {
+  backend = "s3"
+  config = {
+    bucket = "vanillatstodo-terraform-state"
+    key    = "staging/network.tfstate"
+    region = "us-east-2"
   }
 }
 
@@ -59,7 +57,7 @@ resource "aws_eks_cluster" "main" {
   enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
   vpc_config {
-    subnet_ids              = data.aws_subnets.cluster_subnets.ids
+    subnet_ids              = data.terraform_remote_state.network.outputs.subnet_ids
     endpoint_private_access = true
     endpoint_public_access  = true
   }
@@ -73,28 +71,5 @@ resource "aws_eks_cluster" "main" {
   tags = {
     Name        = "${var.environment}-${var.cluster_name}"
     Environment = var.environment
-  }
-}
-
-# Remote State Data Source
-data "terraform_remote_state" "network" {
-  backend = "s3"
-  config = {
-    bucket = "vanillatstodo-terraform-state"
-    key    = "staging/network.tfstate"
-    region = "us-east-2"
-  }
-}
-
-# VPC Data Source
-data "aws_vpc" "main" {
-  id = data.terraform_remote_state.network.outputs.vpc_id
-}
-
-# Subnet Data Source
-data "aws_subnets" "cluster_subnets" {
-  filter {
-    name   = "vpc-id"
-    values = [data.terraform_remote_state.network.outputs.vpc_id]
   }
 }
