@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
@@ -61,44 +61,20 @@ jobs:
           fi
 
       - name: Deploy Network Layer
-        id: network
-        if: success()
-        working-directory: ./devops/terraform/01_network
+        working-directory: devops/terraform/01_network
         run: |
-          set -e
-          echo "Deploying network infrastructure..."
-          terraform fmt -check -diff
-          terraform init \
-            -backend-config="bucket=vanillatstodo-terraform-state" \
-            -backend-config="key=staging/network.tfstate" \
-            -backend-config="region=us-east-2"
-          terraform validate
+          terraform init
           terraform plan -out=tfplan
-          terraform apply -auto-approve tfplan || {
-            echo "Network deployment failed"
-            exit 1
-          }
+          terraform apply tfplan
 
-      - name: Deploy EKS Cluster
-        id: eks
-        if: success()
-        working-directory: ./devops/terraform/02_eks
-        timeout-minutes: 30
+      - name: Deploy EKS Layer
+        working-directory: devops/terraform/02_eks
         run: |
-          set -e
-          echo "Deploying EKS cluster..."
-          terraform fmt -check -diff
-          terraform init \
-            -backend-config="bucket=vanillatstodo-terraform-state" \
-            -backend-config="key=staging/eks.tfstate" \
-            -backend-config="region=us-east-2"
-          terraform validate
+          terraform init
           terraform plan -out=tfplan
-          terraform apply -auto-approve tfplan || {
-            echo "EKS deployment failed"
-            terraform destroy -auto-approve
-            exit 1
-          }
+          terraform apply tfplan
+        env:
+          TF_VAR_environment: staging
 
       - name: Deploy Monitoring
         working-directory: ./devops/terraform/03_monitoring
