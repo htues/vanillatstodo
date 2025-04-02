@@ -4,7 +4,7 @@ resource "aws_vpc" "main" {
   enable_dns_hostnames = var.enable_dns
   enable_dns_support   = var.enable_dns
 
- tags = {
+  tags = {
     Name = "${var.environment}-vanillatstodo-vpc"
   }
 }
@@ -40,7 +40,7 @@ resource "aws_subnet" "subnet_b" {
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
- tags = {
+  tags = {
     Name = "${var.environment}-vanillatstodo-igw"
   }
 }
@@ -54,7 +54,7 @@ resource "aws_route_table" "main" {
     gateway_id = aws_internet_gateway.main.id
   }
 
- tags = {
+  tags = {
     Name = "${var.environment}-vanillatstodo-rt"
   }
 }
