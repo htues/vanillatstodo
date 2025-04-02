@@ -17,10 +17,10 @@ data "aws_dynamodb_table" "state_lock" {
 # Verification outputs
 output "bucket_verification" {
   value = {
-    exists          = data.aws_s3_bucket.state_bucket.id != ""
-    versioning      = data.aws_s3_bucket_versioning.state_bucket.status == "Enabled"
-    region          = data.aws_s3_bucket.state_bucket.region
-    public_blocked  = data.aws_s3_bucket_public_access_block.state_bucket.block_public_acls
+    exists         = data.aws_s3_bucket.state_bucket.id != ""
+    versioning     = data.aws_s3_bucket_versioning.state_bucket.status == "Enabled"
+    region         = data.aws_s3_bucket.state_bucket.region
+    public_blocked = data.aws_s3_bucket_public_access_block.state_bucket.block_public_acls
   }
 }
 
