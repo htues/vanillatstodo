@@ -50,3 +50,14 @@ variable "enable_dns" {
   type        = bool
   default     = true
 }
+
+variable "cluster_name" {
+  description = "Name of the EKS cluster"
+  type        = string
+  default     = "vanillatstodo-cluster"
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]+$", var.cluster_name))
+    error_message = "Cluster name must consist of lower case alphanumeric characters and hyphens only."
+  }
+}
