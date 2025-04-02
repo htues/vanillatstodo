@@ -5,7 +5,11 @@ data "terraform_remote_state" "network" {
     bucket = "vanillatstodo-terraform-state"
     key    = "staging/network.tfstate"
     region = "us-east-2"
+    encrypt = true
+    dynamodb_table = "vanillatstodo-terraform-state-lock"
   }
+
+  workspace = terraform.workspace
 }
 
 # CloudWatch Log Group
