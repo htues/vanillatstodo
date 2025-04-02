@@ -1,43 +1,39 @@
-provider "aws" {
-  region = var.aws_region
-  default_tags {
-    tags = {
-      Environment = var.environment
-      Project     = "vanillatstodo"
-      ManagedBy   = "terraform"
-    }
-  }
-}
-
 # Create VPC with DNS support
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
+  enable_dns_hostnames = var.enable_dns
+  enable_dns_support   = var.enable_dns
 
   tags = {
-    Name = "vanillatstodo-vpc"
+    Name = "${var.environment}-vanillatstodo-vpc"
   }
 }
 
 # Update subnet configurations with proper tagging for EKS
 resource "aws_subnet" "subnet_a" {
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
+  cidr_block              = var.subnet_cidrs["subnet_a"]
   availability_zone       = "${var.aws_region}a"
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                        = "vanillatstodo-subnet-a"
+    Name                                        = "${var.environment}-vanillatstodo-subnet-a"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "Kubernetes:Role:Elb"                       = "1"
   }
 }
 
 resource "aws_subnet" "subnet_b" {
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.2.0/24"
-  availability_zone       = "us-east-2b"
+  cidr_block              = var.subnet_cidrs["subnet_b"]
+  availability_zone       = "${var.aws_region}b"
   map_public_ip_on_launch = true
+
+  tags = {
+    Name                                        = "${var.environment}-vanillatstodo-subnet-b"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "Kubernetes:Role:Elb"                       = "1"
+  }
 }
 
 # Create Internet Gateway
@@ -45,8 +41,7 @@ resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name        = "vanillatstodo-igw"
-    Environment = "staging"
+    Name = "${var.environment}-vanillatstodo-igw"
   }
 }
 
@@ -60,8 +55,7 @@ resource "aws_route_table" "main" {
   }
 
   tags = {
-    Name        = "vanillatstodo-rt"
-    Environment = "staging"
+    Name = "${var.environment}-vanillatstodo-rt"
   }
 }
 
@@ -74,76 +68,4 @@ resource "aws_route_table_association" "a" {
 resource "aws_route_table_association" "b" {
   subnet_id      = aws_subnet.subnet_b.id
   route_table_id = aws_route_table.main.id
-}
-
-# Update EKS security group
-resource "aws_security_group" "eks" {
-  vpc_id      = aws_vpc.main.id
-  name_prefix = "eks-cluster-"
-  description = "Security group for EKS cluster"
-
-  lifecycle {
-    create_before_destroy = true
-  }
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name        = "vanillatstodo-eks-sg"
-    Environment = "staging"
-  }
-}
-
-# Add timeout for EKS cluster creation
-resource "aws_eks_cluster" "main" {
-  name     = var.cluster_name
-  role_arn = aws_iam_role.eks_cluster.arn
-  version  = "1.27" # Specify Kubernetes version
-
-  vpc_config {
-    subnet_ids              = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
-    endpoint_private_access = true
-    endpoint_public_access  = true
-  }
-
-  timeouts {
-    create = "30m"
-    delete = "15m"
-  }
-
-  depends_on = [
-    aws_cloudwatch_log_group.eks,
-    aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy
-  ]
-}
-
-# Enable CloudWatch logging for EKS cluster
-resource "aws_cloudwatch_log_group" "eks" {
-  name              = "/aws/eks/vanillatstodo-cluster/cluster"
-  retention_in_days = 7
-
-  tags = {
-    Environment = "staging"
-    Project     = "vanillatstodo"
-    ManagedBy   = "terraform"
-  }
 }

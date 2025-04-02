@@ -12,8 +12,8 @@ data "aws_dynamodb_table" "state_lock" {
 output "infrastructure_verification" {
   value = {
     bucket_exists = data.aws_s3_bucket.state_bucket.id != ""
-    bucket_arn   = data.aws_s3_bucket.state_bucket.arn
-    table_exists = data.aws_dynamodb_table.state_lock.id != ""
-    table_arn    = data.aws_dynamodb_table.state_lock.arn
+    bucket_arn    = data.aws_s3_bucket.state_bucket.arn
+    table_exists  = data.aws_dynamodb_table.state_lock.id != ""
+    table_arn     = data.aws_dynamodb_table.state_lock.arn
   }
 }
