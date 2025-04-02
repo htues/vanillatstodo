@@ -2,6 +2,11 @@ variable "environment" {
   description = "vanillatstodoenviro"
   type        = string
   default     = "staging"
+
+  validation {
+    condition     = contains(["staging", "production"], var.environment)
+    error_message = "Environment must be either 'staging' or 'production'."
+  }  
 }
 
 variable "aws_region" {
@@ -10,8 +15,3 @@ variable "aws_region" {
   default     = "us-east-2"
 }
 
-variable "cluster_name" {
-  description = "Name of the EKS cluster"
-  type        = string
-  default     = "vanillatstodo-cluster"
-}
