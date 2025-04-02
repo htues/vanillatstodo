@@ -20,3 +20,9 @@ variable "aws_region" {
   type        = string
   default     = "us-east-2"
 }
+
+variable "log_retention_days" {
+  description = "Number of days to retain EKS cluster logs"
+  type        = number
+  default     = 7
+}
