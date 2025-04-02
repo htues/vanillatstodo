@@ -75,3 +75,26 @@ resource "aws_eks_cluster" "main" {
     Environment = var.environment
   }
 }
+
+# Remote State Data Source
+data "terraform_remote_state" "network" {
+  backend = "s3"
+  config = {
+    bucket = "vanillatstodo-terraform-state"
+    key    = "staging/network.tfstate"
+    region = "us-east-2"
+  }
+}
+
+# VPC Data Source
+data "aws_vpc" "main" {
+  id = data.terraform_remote_state.network.outputs.vpc_id
+}
+
+# Subnet Data Source
+data "aws_subnets" "cluster_subnets" {
+  filter {
+    name   = "vpc-id"
+    values = [data.terraform_remote_state.network.outputs.vpc_id]
+  }
+}
