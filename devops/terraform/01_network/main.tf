@@ -1,8 +1,8 @@
 # Create VPC with DNS support
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
+  enable_dns_hostnames = var.enable_dns
+  enable_dns_support   = var.enable_dns
 
  tags = {
     Name = "${var.environment}-vanillatstodo-vpc"
@@ -12,7 +12,7 @@ resource "aws_vpc" "main" {
 # Update subnet configurations with proper tagging for EKS
 resource "aws_subnet" "subnet_a" {
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
+  cidr_block              = var.subnet_cidrs["subnet_a"]
   availability_zone       = "${var.aws_region}a"
   map_public_ip_on_launch = true
 
@@ -25,7 +25,7 @@ resource "aws_subnet" "subnet_a" {
 
 resource "aws_subnet" "subnet_b" {
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.2.0/24"
+  cidr_block              = var.subnet_cidrs["subnet_b"]
   availability_zone       = "${var.aws_region}b"
   map_public_ip_on_launch = true
 
