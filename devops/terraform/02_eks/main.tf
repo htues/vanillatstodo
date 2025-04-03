@@ -76,7 +76,6 @@ resource "aws_eks_cluster" "main" {
   }
 
   depends_on = [
-    aws_cloudwatch_log_group.eks,
     aws_iam_role_policy_attachment.eks_cluster_policy,
     aws_iam_role_policy_attachment.eks_cluster_service_policy
   ]
