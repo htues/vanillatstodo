@@ -11,6 +11,7 @@ name: "Destroy Infrastructure"
   push:
     branches:
       - staging
+      - experimental
     paths:
       - "devops/terraform/**"
 
