@@ -90,7 +90,7 @@ jobs:
 
       - name: Verify EKS Deployment
         if: success()
-        working-directory: ./devops/terraform/02-eks
+        working-directory: ./devops/terraform/02_eks
         run: |
           CLUSTER_STATUS=$(aws eks describe-cluster --name vanillatstodo-cluster --query 'cluster.status' --output text)
           if [ "$CLUSTER_STATUS" != "ACTIVE" ]; then
