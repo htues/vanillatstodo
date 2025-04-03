@@ -99,38 +99,30 @@ jobs:
           fi
 
       - name: Capture Outputs
-        if: success()
-        working-directory: ./devops/terraform/02_eks
         run: |
+          cd devops/terraform/02_eks
           echo "EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name)" >> $GITHUB_ENV
+          cd ../01_network
           echo "VPC_ID=$(terraform output -raw vpc_id)" >> $GITHUB_ENV
 
       - name: Notify on Completion
-        if: always()
         uses: actions/github-script@v6
         with:
           script: |
-            const message = `Infrastructure deployment ${context.job.status}
-            Environment: ${process.env.TF_WORKSPACE}
+            const message = `Infrastructure deployment completed
+            Environment: ${process.env.TF_VAR_environment}
             EKS Cluster: ${process.env.EKS_CLUSTER_NAME}
             VPC: ${process.env.VPC_ID}
-            Timestamp: ${new Date().toISOString()}`;
+            Timestamp: ${new Date().toISOString()}
 
-            console.log(message);
+            Deployment summary:
+            - State Layer: ✅
+            - Network Layer: ✅
+            - EKS Layer: ✅`;
 
-            if (context.payload.pull_request) {
-              await github.rest.issues.createComment({
-                issue_number: context.payload.pull_request.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: message
-              });
-            }
-
-      - name: Deployment Summary
-        if: always()
-        run: |
-          echo "Deployment Status:"
-          echo "State Layer: ${{ steps.state.outcome }}"
-          echo "Network Layer: ${{ steps.network.outcome }}"
-          echo "EKS Layer: ${{ steps.eks.outcome }}"
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            })
