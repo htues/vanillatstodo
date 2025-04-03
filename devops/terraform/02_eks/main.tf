@@ -12,26 +12,6 @@ data "terraform_remote_state" "network" {
   workspace = terraform.workspace
 }
 
-# CloudWatch Log Group
-resource "aws_cloudwatch_log_group" "eks" {
-  name              = "/aws/eks/${var.cluster_name}/cluster"
-  retention_in_days = var.log_retention_days
-
-  tags = {
-    Environment = var.environment
-    Project     = "vanillatstodo"
-  }
-
-  lifecycle {
-    ignore_changes = [
-      name,
-      tags,
-      retention_in_days
-    ]
-    create_before_destroy = true
-  }
-}
-
 # IAM Role for EKS
 resource "aws_iam_role" "eks_cluster" {
   name = "${var.environment}-${var.cluster_name}-role"
