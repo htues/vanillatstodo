@@ -106,23 +106,14 @@ jobs:
           echo "VPC_ID=$(terraform output -raw vpc_id)" >> $GITHUB_ENV
 
       - name: Notify on Completion
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const message = `Infrastructure deployment completed
-            Environment: ${process.env.TF_VAR_environment}
-            EKS Cluster: ${process.env.EKS_CLUSTER_NAME}
-            VPC: ${process.env.VPC_ID}
-            Timestamp: ${new Date().toISOString()}
-
-            Deployment summary:
-            - State Layer: ✅
-            - Network Layer: ✅
-            - EKS Layer: ✅`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: message
-            })
+        run: |
+          echo "Infrastructure deployment completed"
+          echo "Environment: ${{ env.TF_VAR_environment }}"
+          echo "EKS Cluster: ${{ env.EKS_CLUSTER_NAME }}"
+          echo "VPC: ${{ env.VPC_ID }}"
+          echo "Timestamp: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          echo ""
+          echo "Deployment summary:"
+          echo "- State Layer: ✅"
+          echo "- Network Layer: ✅"
+          echo "- EKS Layer: ✅"
