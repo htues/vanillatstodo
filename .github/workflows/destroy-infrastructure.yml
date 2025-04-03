@@ -1,4 +1,3 @@
----
 name: "Destroy Infrastructure"
 
 "on":
@@ -8,6 +7,12 @@ name: "Destroy Infrastructure"
         description: "Type 'destroy' to confirm"
         required: true
         type: string
+
+  push:
+    branches:
+      - staging
+    paths:
+      - "devops/terraform/**"
 
 permissions:
   contents: read
