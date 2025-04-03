@@ -67,6 +67,13 @@ jobs:
           terraform plan -out=tfplan
           terraform apply tfplan
 
+      - name: Import Existing Log Group
+        working-directory: devops/terraform/02_eks
+        run: |
+          if aws logs describe-log-groups --log-group-name-prefix "/aws/eks/vanillatstodo-cluster" | grep -q "logGroupName"; then
+            terraform import aws_cloudwatch_log_group.eks "/aws/eks/vanillatstodo-cluster/cluster" || true
+          fi
+
       - name: Deploy EKS Layer
         working-directory: devops/terraform/02_eks
         run: |

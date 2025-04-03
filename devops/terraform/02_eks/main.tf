@@ -21,6 +21,11 @@ resource "aws_cloudwatch_log_group" "eks" {
     Environment = var.environment
     Project     = "vanillatstodo"
   }
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [tags]
+  }  
 }
 
 # IAM Role for EKS
