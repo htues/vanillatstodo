@@ -23,9 +23,11 @@ resource "aws_cloudwatch_log_group" "eks" {
   }
 
   lifecycle {
-    prevent_destroy = true
-    ignore_changes  = [tags]
-  }  
+    ignore_changes = [
+      tags,
+      retention_in_days
+    ]
+  }
 }
 
 # IAM Role for EKS
