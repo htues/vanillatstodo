@@ -43,6 +43,8 @@ jobs:
 
       - name: Import Existing Resources
         run: |
+          pwd  # Debug current directory
+          ls -la devops/scripts/  # Verify script exists
           chmod +x devops/scripts/import-resources.sh
           ./devops/scripts/import-resources.sh
 
