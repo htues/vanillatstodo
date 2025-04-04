@@ -77,12 +77,27 @@ jobs:
           if [ "$VPC_ID" != "None" ]; then
             echo "Found VPC: $VPC_ID"
             
-            # Delete Security Groups (except default)
+           # Delete Security Groups
             echo "🔍 Finding Security Groups..."
-            SG_IDS=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text)
+            SG_IDS=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=*vanillatstodo-eks-sg*" --query 'SecurityGroups[*].GroupId' --output text)
             for sg in $SG_IDS; do
               echo "🗑️ Deleting Security Group: $sg"
               aws ec2 delete-security-group --group-id $sg || true
+            done
+
+            # Delete Route Tables
+            echo "🔍 Finding Route Tables..."
+            RT_IDS=$(aws ec2 describe-route-tables --filters "Name=tag:Name,Values=*vanillatstodo-rt*" --query 'RouteTables[*].RouteTableId' --output text)
+            for rt in $RT_IDS; do
+              # First, disassociate any subnet associations
+              ASSOC_IDS=$(aws ec2 describe-route-tables --route-table-id $rt --query 'RouteTables[*].Associations[*].RouteTableAssociationId' --output text)
+              for assoc in $ASSOC_IDS; do
+                echo "🔄 Disassociating route table association: $assoc"
+                aws ec2 disassociate-route-table --association-id $assoc
+              done
+              
+              echo "🗑️ Deleting Route Table: $rt"
+              aws ec2 delete-route-table --route-table-id $rt || true
             done
 
             # Delete NAT Gateways
