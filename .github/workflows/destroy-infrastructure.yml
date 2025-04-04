@@ -38,23 +38,36 @@ jobs:
         run: |
           CLUSTER_NAME="vanillatstodo-cluster"
 
-          echo "🔍 Checking for EKS node groups..."
-          NODE_GROUPS=$(aws eks list-nodegroups --cluster-name $CLUSTER_NAME --query 'nodegroups[*]' --output text || echo "")
+          # Check if cluster exists first
+          echo "🔍 Checking if EKS cluster exists..."
+          if aws eks describe-cluster --name $CLUSTER_NAME >/dev/null 2>&1; then
+            echo "✅ Found EKS cluster: $CLUSTER_NAME"
 
-          if [ ! -z "$NODE_GROUPS" ]; then
-            echo "Found node groups: $NODE_GROUPS"
-            for ng in $NODE_GROUPS; do
-              echo "🗑️ Deleting node group: $ng"
-              aws eks delete-nodegroup --cluster-name $CLUSTER_NAME --nodegroup-name $ng
-              echo "⏳ Waiting for node group deletion..."
-              aws eks wait nodegroup-deleted --cluster-name $CLUSTER_NAME --nodegroup-name $ng
-            done
+            # Add required EKS permissions
+            aws iam attach-role-policy \
+              --role-name vanillatstodo-deployer \
+              --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+
+            echo "🔍 Checking for EKS node groups..."
+            NODE_GROUPS=$(aws eks list-nodegroups --cluster-name $CLUSTER_NAME --query 'nodegroups[*]' --output text || echo "")
+
+            if [ ! -z "$NODE_GROUPS" ]; then
+              echo "Found node groups: $NODE_GROUPS"
+              for ng in $NODE_GROUPS; do
+                echo "🗑️ Deleting node group: $ng"
+                aws eks delete-nodegroup --cluster-name $CLUSTER_NAME --nodegroup-name $ng
+                echo "⏳ Waiting for node group deletion..."
+                aws eks wait nodegroup-deleted --cluster-name $CLUSTER_NAME --nodegroup-name $ng
+              done
+            fi
+
+            echo "🗑️ Deleting EKS cluster..."
+            aws eks delete-cluster --name $CLUSTER_NAME
+            echo "⏳ Waiting for cluster deletion..."
+            aws eks wait cluster-deleted --name $CLUSTER_NAME
+          else
+            echo "ℹ️ EKS cluster does not exist, skipping..."
           fi
-
-          echo "🗑️ Deleting EKS cluster..."
-          aws eks delete-cluster --name $CLUSTER_NAME
-          echo "⏳ Waiting for cluster deletion..."
-          aws eks wait cluster-deleted --name $CLUSTER_NAME
 
       - name: Clean Up Network Resources
         run: |
