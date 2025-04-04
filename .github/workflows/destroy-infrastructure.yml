@@ -77,9 +77,39 @@ jobs:
           if [ "$VPC_ID" != "None" ]; then
             echo "Found VPC: $VPC_ID"
             
-           # Delete Security Groups
+            # List all dependencies for debugging
+            echo "📋 Listing VPC Dependencies..."
+            aws ec2 describe-vpc-attribute --vpc-id $VPC_ID --attribute enableDnsSupport
+            aws ec2 describe-vpc-peering-connections --filters "Name=requester-vpc-info.vpc-id,Values=$VPC_ID"
+            aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID"
+
+            # Delete any VPC Endpoints
+            echo "🔍 Finding VPC Endpoints..."
+            ENDPOINTS=$(aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID" --query 'VpcEndpoints[*].VpcEndpointId' --output text)
+            for endpoint in $ENDPOINTS; do
+              echo "🗑️ Deleting VPC Endpoint: $endpoint"
+              aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $endpoint
+            done
+
+            # Delete all ENIs
+            echo "🔍 Finding Network Interfaces..."
+            ENI_IDS=$(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text)
+            for eni in $ENI_IDS; do
+              echo "🗑️ Deleting Network Interface: $eni"
+              aws ec2 delete-network-interface --network-interface-id $eni || {
+                echo "⚠️ Cannot delete ENI directly, detaching first..."
+                ATTACHMENT_ID=$(aws ec2 describe-network-interfaces --network-interface-ids $eni --query 'NetworkInterfaces[0].Attachment.AttachmentId' --output text)
+                if [ "$ATTACHMENT_ID" != "None" ]; then
+                  aws ec2 detach-network-interface --attachment-id $ATTACHMENT_ID --force
+                  sleep 10
+                  aws ec2 delete-network-interface --network-interface-id $eni
+                fi
+              }
+            done
+
+            # Delete Security Groups (except default)
             echo "🔍 Finding Security Groups..."
-            SG_IDS=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=*vanillatstodo-eks-sg*" --query 'SecurityGroups[*].GroupId' --output text)
+            SG_IDS=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=*vanillatstodo*" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text)
             for sg in $SG_IDS; do
               echo "🗑️ Deleting Security Group: $sg"
               aws ec2 delete-security-group --group-id $sg || true
@@ -87,35 +117,15 @@ jobs:
 
             # Delete Route Tables
             echo "🔍 Finding Route Tables..."
-            RT_IDS=$(aws ec2 describe-route-tables --filters "Name=tag:Name,Values=*vanillatstodo-rt*" --query 'RouteTables[*].RouteTableId' --output text)
-            for rt in $RT_IDS; do
-              # First, disassociate any subnet associations
-              ASSOC_IDS=$(aws ec2 describe-route-tables --route-table-id $rt --query 'RouteTables[*].Associations[*].RouteTableAssociationId' --output text)
-              for assoc in $ASSOC_IDS; do
-                echo "🔄 Disassociating route table association: $assoc"
-                aws ec2 disassociate-route-table --association-id $assoc
-              done
-              
-              echo "🗑️ Deleting Route Table: $rt"
-              aws ec2 delete-route-table --route-table-id $rt || true
-            done
-
-            # Delete NAT Gateways
-            echo "🔍 Finding NAT Gateways..."
-            NAT_IDS=$(aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=$VPC_ID" --query 'NatGateways[*].NatGatewayId' --output text)
-            for nat in $NAT_IDS; do
-              echo "🗑️ Deleting NAT Gateway: $nat"
-              aws ec2 delete-nat-gateway --nat-gateway-id $nat
-              echo "⏳ Waiting for NAT Gateway deletion..."
-              aws ec2 wait nat-gateway-deleted --nat-gateway-ids $nat
-            done
-
-            # Delete Route Tables (except main)
-            echo "🔍 Finding Route Tables..."
             RT_IDS=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text)
             for rt in $RT_IDS; do
+              ASSOC_IDS=$(aws ec2 describe-route-tables --route-table-id $rt --query 'RouteTables[*].Associations[*].RouteTableAssociationId' --output text)
+              for assoc in $ASSOC_IDS; do
+                echo "🔄 Disassociating route table: $assoc"
+                aws ec2 disassociate-route-table --association-id $assoc
+              done
               echo "🗑️ Deleting Route Table: $rt"
-              aws ec2 delete-route-table --route-table-id $rt || true
+              aws ec2 delete-route-table --route-table-id $rt
             done
 
             # Delete Internet Gateway
@@ -125,14 +135,6 @@ jobs:
               aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
               aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID
             fi
-            
-            # Delete Network Interfaces
-            echo "🔍 Finding Network Interfaces..."
-            ENI_IDS=$(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text)
-            for eni in $ENI_IDS; do
-              echo "🗑️ Deleting Network Interface: $eni"
-              aws ec2 delete-network-interface --network-interface-id $eni || true
-            done
 
             # Delete Subnets
             SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[*].SubnetId' --output text)
@@ -140,8 +142,8 @@ jobs:
               echo "🗑️ Deleting subnet: $subnet"
               aws ec2 delete-subnet --subnet-id $subnet
             done
-            
-            # Delete VPC
+
+            # Final attempt to delete VPC
             echo "🗑️ Deleting VPC..."
             aws ec2 delete-vpc --vpc-id $VPC_ID
           fi
