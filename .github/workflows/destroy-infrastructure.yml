@@ -41,6 +41,11 @@ jobs:
         with:
           terraform_version: "1.7.0"
 
+      - name: Import Existing Resources
+        run: |
+          chmod +x devops/scripts/import-resources.sh
+          ./devops/scripts/import-resources.sh
+
       - name: Destroy EKS Layer
         working-directory: devops/terraform/02_eks
         run: |
