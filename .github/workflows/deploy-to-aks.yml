@@ -1,156 +1,174 @@
 name: Deploy to AKS
 
-on:
-  push:
-    branches:
-      - main
+"on":
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type 'deploy' to confirm"
+        required: true
+        type: string
+      environment:
+        description: "Select deployment environment"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: "staging"
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   deploy:
+    name: "Deploy to AKS"
     runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirmation == 'deploy' }}
+    environment: ${{ github.event.inputs.environment }}
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-    - name: Login to Azure
-      uses: azure/login@v1
-      with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Check Azure CLI version
-      run: az --version        
+      - name: Check Azure CLI version
+        run: az --version
 
-    - name: Install kubelogin
-      run: |
-        az aks install-cli
+      - name: Install kubelogin
+        run: |
+          az aks install-cli
 
-    - name: Assign Log Analytics Contributor Role
-      run: |
-        SP_ID=$(az ad sp list --display-name vanillatstodosp --query "[].appId" -o tsv)
-        az role assignment create --assignee $SP_ID --role "Log Analytics Contributor" --scope /subscriptions/e8698c35-8189-4f9a-be17-a00cfa7f6c02/resourceGroups/vanillatstodogroup        
+      - name: Assign Log Analytics Contributor Role
+        run: |
+          SP_ID=$(az ad sp list --display-name vanillatstodosp --query "[].appId" -o tsv)
+          az role assignment create --assignee $SP_ID --role "Log Analytics Contributor" --scope /subscriptions/e8698c35-8189-4f9a-be17-a00cfa7f6c02/resourceGroups/vanillatstodogroup
 
-    - name: Create Log Analytics Workspace
-      run: |
-        az monitor log-analytics workspace create --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --location westus
-  
-    - name: Wait for Log Analytics Workspace to be ready
-      run: |
-        echo "Waiting for Log Analytics Workspace to be ready..."
-        for i in {1..10}; do
-          WORKSPACE_STATUS=$(az monitor log-analytics workspace show --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --query "provisioningState" -o tsv)
-          if [ "$WORKSPACE_STATUS" == "Succeeded" ]; then
-            echo "Log Analytics Workspace is ready."
-            break
+      - name: Create Log Analytics Workspace
+        run: |
+          az monitor log-analytics workspace create --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --location westus
+
+      - name: Wait for Log Analytics Workspace to be ready
+        run: |
+          echo "Waiting for Log Analytics Workspace to be ready..."
+          for i in {1..10}; do
+            WORKSPACE_STATUS=$(az monitor log-analytics workspace show --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --query "provisioningState" -o tsv)
+            if [ "$WORKSPACE_STATUS" == "Succeeded" ]; then
+              echo "Log Analytics Workspace is ready."
+              break
+            fi
+            echo "Log Analytics Workspace is not ready yet. Waiting..."
+            sleep 30
+          done
+
+      - name: Create AKS Cluster
+        run: |
+          if az aks show --resource-group vanillatstodogroup --name vanillatstodocluster > /dev/null 2>&1; then
+            echo "AKS Cluster already exists. Skipping creation."
+          else
+            az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --workspace-resource-id $(az monitor log-analytics workspace show --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --query id -o tsv) --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
           fi
-          echo "Log Analytics Workspace is not ready yet. Waiting..."
-          sleep 30
-        done
 
-    - name: Create AKS Cluster
-      run: |
-        if az aks show --resource-group vanillatstodogroup --name vanillatstodocluster > /dev/null 2>&1; then
-          echo "AKS Cluster already exists. Skipping creation."
-        else
-          az aks create --resource-group vanillatstodogroup --name vanillatstodocluster --node-count 1 --enable-addons monitoring --workspace-resource-id $(az monitor log-analytics workspace show --resource-group vanillatstodogroup --workspace-name vanillatstodoWorkspace --query id -o tsv) --generate-ssh-keys --location westus --node-vm-size "Standard_B2s"
-        fi
+      - name: Wait for AKS Cluster to be ready
+        run: |
+          echo "Waiting for AKS Cluster to be ready..."
+          for i in {1..20}; do
+            CLUSTER_STATUS=$(az aks show --resource-group vanillatstodogroup --name vanillatstodocluster --query "provisioningState" -o tsv)
+            if [ "$CLUSTER_STATUS" == "Succeeded" ]; then
+              echo "AKS Cluster is ready."
+              break
+            fi
+            echo "AKS Cluster is not ready yet. Waiting..."
+            sleep 30
+          done
 
-    - name: Wait for AKS Cluster to be ready
-      run: |
-        echo "Waiting for AKS Cluster to be ready..."
-        for i in {1..20}; do
-          CLUSTER_STATUS=$(az aks show --resource-group vanillatstodogroup --name vanillatstodocluster --query "provisioningState" -o tsv)
-          if [ "$CLUSTER_STATUS" == "Succeeded" ]; then
-            echo "AKS Cluster is ready."
-            break
+      - name: Get AKS Credentials
+        run: |
+          az aks get-credentials --resource-group vanillatstodogroup --name vanillatstodocluster --admin
+
+      - name: Set AKS Context
+        uses: azure/aks-set-context@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          resource-group: vanillatstodogroup
+          cluster-name: vanillatstodocluster
+
+      - name: Configure kubelogin
+        run: |
+          kubelogin convert-kubeconfig -l azurecli
+
+      - name: Verify Kubernetes Context
+        run: |
+          kubectl config current-context
+
+      - name: Print Kubernetes Configuration
+        run: |
+          kubectl config view
+
+      - name: Create Docker Hub Secret
+        run: |
+          if kubectl get secret regcred > /dev/null 2>&1; then
+            echo "Docker Hub Secret already exists. Skipping creation."
+          else
+            kubectl create secret docker-registry regcred \
+              --docker-server=https://index.docker.io/v1/ \
+              --docker-username=${{ secrets.DOCKER_HUB_USERNAME }} \
+              --docker-password=${{ secrets.DOCKER_HUB_PAT }} \
+              --docker-email=${{ secrets.DOCKER_HUB_EMAIL }}
           fi
-          echo "AKS Cluster is not ready yet. Waiting..."
-          sleep 30
-        done
 
-    - name: Get AKS Credentials
-      run: |
-        az aks get-credentials --resource-group vanillatstodogroup --name vanillatstodocluster --admin
+      - name: Login to Docker Hub
+        run: |
+          echo ${{ secrets.DOCKER_HUB_PAT }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
 
-    - name: Set AKS Context
-      uses: azure/aks-set-context@v1
-      with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }}
-        resource-group: vanillatstodogroup
-        cluster-name: vanillatstodocluster
+      - name: Pull Docker image
+        run: |
+          docker pull hftamayo/vanillatstodo:0.0.1
 
-    - name: Configure kubelogin
-      run: |
-        kubelogin convert-kubeconfig -l azurecli
+      - name: Deploy to AKS
+        uses: azure/k8s-deploy@v1
+        with:
+          manifests: |
+            vanillatstodo_deployment.yml
+            vanillatstodo_service.yml
 
-    - name: Verify Kubernetes Context
-      run: |
-        kubectl config current-context
+      - name: Wait for Deployment Rollout
+        run: |
+          kubectl rollout status deployment/vanillatstodo --timeout=10m
 
-    - name: Print Kubernetes Configuration
-      run: |
-        kubectl config view
+      - name: List Deployments
+        run: |
+          kubectl get deployments
 
-    - name: Create Docker Hub Secret
-      run: |
-        if kubectl get secret regcred > /dev/null 2>&1; then
-          echo "Docker Hub Secret already exists. Skipping creation."
-        else
-          kubectl create secret docker-registry regcred \
-            --docker-server=https://index.docker.io/v1/ \
-            --docker-username=${{ secrets.DOCKER_HUB_USERNAME }} \
-            --docker-password=${{ secrets.DOCKER_HUB_PAT }} \
-            --docker-email=${{ secrets.DOCKER_HUB_EMAIL }}
-        fi
+      - name: Describe Deployment
+        run: |
+          kubectl describe deployment vanillatstodo
 
-    - name: Login to Docker Hub
-      run: |
-        echo ${{ secrets.DOCKER_HUB_PAT }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
+      - name: Get Pod Logs
+        run: |
+          kubectl logs -l app=vanillatstodo
 
-    - name: Pull Docker image
-      run: |
-        docker pull hftamayo/vanillatstodo:0.0.1
+      - name: Get Service Public IP
+        run: |
+          echo "Waiting for service to get an external IP..."
+          for i in {1..20}; do
+            EXTERNAL_IP=$(kubectl get svc vanillatstodo -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [ -n "$EXTERNAL_IP" ]; then
+              echo "Service is available at: $EXTERNAL_IP"
+              break
+            fi
+            echo "Service external IP not available yet. Waiting..."
+            sleep 15
+          done
 
-    - name: Deploy to AKS
-      uses: azure/k8s-deploy@v1
-      with:
-        manifests: |
-          vanillatstodo_deployment.yml
-          vanillatstodo_service.yml
+      - name: Create DNS Zone
+        run: |
+          az network dns zone create --resource-group vanillatstodogroup --name vanillatstodo.hftamayo.com
 
-    - name: Wait for Deployment Rollout
-      run: |
-        kubectl rollout status deployment/vanillatstodo --timeout=10m
-
-    - name: List Deployments
-      run: |
-        kubectl get deployments
-
-    - name: Describe Deployment
-      run: |
-        kubectl describe deployment vanillatstodo
-
-    - name: Get Pod Logs
-      run: |
-        kubectl logs -l app=vanillatstodo
-
-    - name: Get Service Public IP
-      run: |
-        echo "Waiting for service to get an external IP..."
-        for i in {1..20}; do
-          EXTERNAL_IP=$(kubectl get svc vanillatstodo -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          if [ -n "$EXTERNAL_IP" ]; then
-            echo "Service is available at: $EXTERNAL_IP"
-            break
-          fi
-          echo "Service external IP not available yet. Waiting..."
-          sleep 15
-        done        
-
-    - name: Create DNS Zone
-      run: |
-        az network dns zone create --resource-group vanillatstodogroup --name vanillatstodo.hftamayo.com
-
-    - name: Create A Record
-      run: |
-        az network dns record-set a add-record --resource-group vanillatstodogroup --zone-name vanillatstodo.hftamayo.com --record-set-name www --ipv4-address $EXTERNAL_IP        
+      - name: Create A Record
+        run: |
+          az network dns record-set a add-record --resource-group vanillatstodogroup --zone-name vanillatstodo.hftamayo.com --record-set-name www --ipv4-address $EXTERNAL_IP
