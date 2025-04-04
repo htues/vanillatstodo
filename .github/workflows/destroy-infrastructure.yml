@@ -41,15 +41,30 @@ jobs:
         with:
           terraform_version: "1.7.0"
 
-      - name: Destroy Infrastructure
+      - name: Destroy EKS Layer
+        working-directory: devops/terraform/02_eks
+        run: |
+          terraform init
+          terraform destroy -auto-approve || {
+            echo "❌ EKS destroy failed"
+            exit 1
+          }
+
+      - name: Destroy Network Layer
+        working-directory: devops/terraform/01_network
+        run: |
+          terraform init
+          terraform destroy -auto-approve || {
+            echo "❌ Network destroy failed"
+            exit 1
+          }
+
+      - name: Destroy State Layer
         working-directory: devops/terraform/00_state
         run: |
-          echo "🔄 Initializing Terraform..."
           terraform init
-
-          echo "💥 Destroying infrastructure..."
           terraform destroy -auto-approve || {
-            echo "❌ Destroy failed"
+            echo "❌ State destroy failed"
             exit 1
           }
 
