@@ -42,7 +42,7 @@ jobs:
           terraform_version: "1.7.0"
 
       - name: Destroy Infrastructure
-        working-directory: devops/terraform/00-state
+        working-directory: devops/terraform/00_state
         run: |
           echo "🔄 Initializing Terraform..."
           terraform init
