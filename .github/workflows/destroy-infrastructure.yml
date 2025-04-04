@@ -64,6 +64,32 @@ jobs:
           if [ "$VPC_ID" != "None" ]; then
             echo "Found VPC: $VPC_ID"
             
+            # Delete Security Groups (except default)
+            echo "🔍 Finding Security Groups..."
+            SG_IDS=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text)
+            for sg in $SG_IDS; do
+              echo "🗑️ Deleting Security Group: $sg"
+              aws ec2 delete-security-group --group-id $sg || true
+            done
+
+            # Delete NAT Gateways
+            echo "🔍 Finding NAT Gateways..."
+            NAT_IDS=$(aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=$VPC_ID" --query 'NatGateways[*].NatGatewayId' --output text)
+            for nat in $NAT_IDS; do
+              echo "🗑️ Deleting NAT Gateway: $nat"
+              aws ec2 delete-nat-gateway --nat-gateway-id $nat
+              echo "⏳ Waiting for NAT Gateway deletion..."
+              aws ec2 wait nat-gateway-deleted --nat-gateway-ids $nat
+            done
+
+            # Delete Route Tables (except main)
+            echo "🔍 Finding Route Tables..."
+            RT_IDS=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text)
+            for rt in $RT_IDS; do
+              echo "🗑️ Deleting Route Table: $rt"
+              aws ec2 delete-route-table --route-table-id $rt || true
+            done
+
             # Delete Internet Gateway
             IGW_ID=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[0].InternetGatewayId' --output text)
             if [ "$IGW_ID" != "None" ]; then
@@ -72,6 +98,14 @@ jobs:
               aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID
             fi
             
+            # Delete Network Interfaces
+            echo "🔍 Finding Network Interfaces..."
+            ENI_IDS=$(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text)
+            for eni in $ENI_IDS; do
+              echo "🗑️ Deleting Network Interface: $eni"
+              aws ec2 delete-network-interface --network-interface-id $eni || true
+            done
+
             # Delete Subnets
             SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[*].SubnetId' --output text)
             for subnet in $SUBNET_IDS; do
