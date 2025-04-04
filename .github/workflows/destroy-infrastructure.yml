@@ -8,13 +8,6 @@ name: "Destroy Infrastructure"
         required: true
         type: string
 
-  push:
-    branches:
-      - staging
-      - experimental
-    paths:
-      - "devops/terraform/**"
-
 permissions:
   contents: read
   id-token: write
@@ -41,38 +34,52 @@ jobs:
         with:
           terraform_version: "1.7.0"
 
-      - name: Import Existing Resources
+      - name: Destroy EKS Resources
         run: |
-          pwd  # Debug current directory
-          ls -la devops/scripts/  # Verify script exists
-          chmod +x devops/scripts/import-resources.sh
-          ./devops/scripts/import-resources.sh
+          CLUSTER_NAME="vanillatstodo-cluster"
 
-      - name: Destroy EKS Layer
-        working-directory: devops/terraform/02_eks
+          echo "🔍 Checking for EKS node groups..."
+          NODE_GROUPS=$(aws eks list-nodegroups --cluster-name $CLUSTER_NAME --query 'nodegroups[*]' --output text || echo "")
+
+          if [ ! -z "$NODE_GROUPS" ]; then
+            echo "Found node groups: $NODE_GROUPS"
+            for ng in $NODE_GROUPS; do
+              echo "🗑️ Deleting node group: $ng"
+              aws eks delete-nodegroup --cluster-name $CLUSTER_NAME --nodegroup-name $ng
+              echo "⏳ Waiting for node group deletion..."
+              aws eks wait nodegroup-deleted --cluster-name $CLUSTER_NAME --nodegroup-name $ng
+            done
+          fi
+
+          echo "🗑️ Deleting EKS cluster..."
+          aws eks delete-cluster --name $CLUSTER_NAME
+          echo "⏳ Waiting for cluster deletion..."
+          aws eks wait cluster-deleted --name $CLUSTER_NAME
+
+      - name: Clean Up Network Resources
         run: |
-          terraform init
-          terraform destroy -auto-approve || {
-            echo "❌ EKS destroy failed"
-            exit 1
-          }
+          echo "🔍 Finding VPC resources..."
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=*vanillatstodo*" --query 'Vpcs[0].VpcId' --output text)
 
-      - name: Destroy Network Layer
-        working-directory: devops/terraform/01_network
-        run: |
-          terraform init
-          terraform destroy -auto-approve || {
-            echo "❌ Network destroy failed"
-            exit 1
-          }
-
-      - name: Destroy State Layer
-        working-directory: devops/terraform/00_state
-        run: |
-          terraform init
-          terraform destroy -auto-approve || {
-            echo "❌ State destroy failed"
-            exit 1
-          }
-
-          echo "✅ Infrastructure destroyed successfully"
+          if [ "$VPC_ID" != "None" ]; then
+            echo "Found VPC: $VPC_ID"
+            
+            # Delete Internet Gateway
+            IGW_ID=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[0].InternetGatewayId' --output text)
+            if [ "$IGW_ID" != "None" ]; then
+              echo "🗑️ Detaching and deleting Internet Gateway..."
+              aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
+              aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID
+            fi
+            
+            # Delete Subnets
+            SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[*].SubnetId' --output text)
+            for subnet in $SUBNET_IDS; do
+              echo "🗑️ Deleting subnet: $subnet"
+              aws ec2 delete-subnet --subnet-id $subnet
+            done
+            
+            # Delete VPC
+            echo "🗑️ Deleting VPC..."
+            aws ec2 delete-vpc --vpc-id $VPC_ID
+          fi
