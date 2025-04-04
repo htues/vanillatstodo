@@ -1,0 +1,56 @@
+name: "Destroy Infrastructure"
+
+"on":
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type 'destroy' to confirm"
+        required: true
+        type: string
+
+  push:
+    branches:
+      - staging
+      - experimental
+    paths:
+      - "devops/terraform/**"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  destroy:
+    name: "Destroy Infrastructure"
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirmation == 'destroy' }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Destroy Infrastructure
+        working-directory: devops/terraform/00-state
+        run: |
+          echo "🔄 Initializing Terraform..."
+          terraform init
+
+          echo "💥 Destroying infrastructure..."
+          terraform destroy -auto-approve || {
+            echo "❌ Destroy failed"
+            exit 1
+          }
+
+          echo "✅ Infrastructure destroyed successfully"

@@ -2,8 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vanillatstodo
+  labels:
+    app: vanillatstodo
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
       app: vanillatstodo
@@ -17,3 +19,5 @@ spec:
         image: hftamayo/vanillatstodo:0.0.1
         ports:
         - containerPort: 80
+      imagePullSecrets:
+      - name: regcred
