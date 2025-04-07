@@ -176,3 +176,68 @@ jobs:
             sleep 30  # Wait for all deletions to complete
             aws ec2 delete-vpc --vpc-id $VPC_ID
           fi
+
+      - name: Clean Up State Resources
+        run: |
+          # DynamoDB Table Cleanup
+          TABLE_NAME="vanillatstodo-terraform-state-lock"
+          echo "🔍 Checking DynamoDB table: $TABLE_NAME"
+
+          TABLE_STATUS=$(aws dynamodb describe-table \
+            --table-name $TABLE_NAME \
+            --query 'Table.TableStatus' \
+            --output text 2>/dev/null || echo "NOT_FOUND")
+
+          if [ "$TABLE_STATUS" == "ACTIVE" ]; then
+            echo "📋 Found active table: $TABLE_NAME"
+            
+            # Delete the table
+            echo "🗑️ Deleting DynamoDB table..."
+            aws dynamodb delete-table --table-name $TABLE_NAME
+            
+            # Wait for deletion to complete
+            echo "⏳ Waiting for table deletion..."
+            aws dynamodb wait table-not-exists --table-name $TABLE_NAME
+            
+            echo "✅ DynamoDB table deleted successfully"
+          else
+            echo "ℹ️ Table not found or already in deletion process"
+          fi
+
+      - name: Clean Up S3 Resources
+        run: |
+          BUCKET_NAME="vanillatstodo-terraform-state"
+
+          echo "🔍 Checking S3 bucket: $BUCKET_NAME"
+          if aws s3api head-bucket --bucket $BUCKET_NAME 2>/dev/null; then
+            echo "📦 Found bucket: $BUCKET_NAME"
+            
+            # First remove versioning
+            echo "🔄 Disabling versioning..."
+            aws s3api put-bucket-versioning \
+              --bucket $BUCKET_NAME \
+              --versioning-configuration Status=Suspended
+
+            # Delete all versions and delete markers
+            echo "🗑️ Removing all object versions..."
+            aws s3api list-object-versions \
+              --bucket $BUCKET_NAME \
+              --output json \
+              --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}} + {Quiet: `false`}' \
+              | aws s3api delete-objects --bucket $BUCKET_NAME --delete file:///dev/stdin || true
+
+            echo "🗑️ Removing delete markers..."
+            aws s3api list-object-versions \
+              --bucket $BUCKET_NAME \
+              --output json \
+              --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}} + {Quiet: `false`}' \
+              | aws s3api delete-objects --bucket $BUCKET_NAME --delete file:///dev/stdin || true
+
+            # Finally delete the bucket
+            echo "🗑️ Deleting bucket..."
+            aws s3api delete-bucket --bucket $BUCKET_NAME
+            
+            echo "✅ S3 bucket cleanup completed"
+          else
+            echo "ℹ️ Bucket not found or already deleted"
+          fi
