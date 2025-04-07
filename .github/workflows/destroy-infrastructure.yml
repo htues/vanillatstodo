@@ -51,7 +51,7 @@ jobs:
           # Check if cluster exists first
           echo "🔍 Checking if EKS cluster exists..."
           if aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} >/dev/null 2>&1; then
-            echo "✅ Found EKS cluster: ${{ env.CLUSTER_NAME }}
+            echo "✅ Found EKS cluster: ${{ env.CLUSTER_NAME }}"
 
             # Add required EKS permissions
             aws iam attach-role-policy \
@@ -72,16 +72,15 @@ jobs:
             fi
 
             echo "🗑️ Deleting EKS cluster..."
-            aws eks delete-cluster --name ${{ env.CLUSTER_NAME }}
-            echo "⏳ Waiting for cluster deletion..."
-            aws eks wait cluster-deleted --name ${{ env.CLUSTER_NAME }}
+            if aws eks delete-cluster --name ${{ env.CLUSTER_NAME }}; then
+              echo "EKS_STATUS=✅" >> $GITHUB_ENV
+              aws eks wait cluster-deleted --name ${{ env.CLUSTER_NAME }}
+            else
+              echo "EKS_STATUS=❌" >> $GITHUB_ENV
+            fi
           else
             echo "ℹ️ EKS cluster does not exist, skipping..."
-          fi
-          if aws eks delete-cluster --name ${{ env.CLUSTER_NAME }}; then
-              echo "EKS_STATUS=✅" >> $GITHUB_ENV
-          else
-              echo "EKS_STATUS=❌" >> $GITHUB_ENV
+            echo "EKS_STATUS=✅" >> $GITHUB_ENV
           fi
 
       - name: Clean Up Network Resources
@@ -209,23 +208,14 @@ jobs:
             --output text 2>/dev/null || echo "NOT_FOUND")
 
           if [ "$TABLE_STATUS" == "ACTIVE" ]; then
-            echo "📋 Found active table: ${{ env.TABLE_NAME }}"
-            
-            # Delete the table
-            echo "🗑️ Deleting DynamoDB table..."
-            aws dynamodb delete-table --table-name ${{ env.TABLE_NAME }}
-            
-            # Wait for deletion to complete
-            echo "⏳ Waiting for table deletion..."
-            aws dynamodb wait table-not-exists --table-name ${{ env.TABLE_NAME }}
-            
-            echo "✅ DynamoDB table deleted successfully"
+            if aws dynamodb delete-table --table-name ${{ env.TABLE_NAME }}; then
+              aws dynamodb wait table-not-exists --table-name ${{ env.TABLE_NAME }}
+              echo "DYNAMODB_STATUS=✅" >> $GITHUB_ENV
+            else
+              echo "DYNAMODB_STATUS=❌" >> $GITHUB_ENV
+            fi
           else
-            echo "ℹ️ Table not found or already in deletion process"
-          fi
-          if [ "$TABLE_STATUS" == "ACTIVE" ]; then
-            # ...existing code...
-            echo "DYNAMODB_STATUS=✅" >> $GITHUB_ENV
+            echo "DYNAMODB_STATUS=✅" >> $GITHUB_ENV  # Already deleted
           fi
 
       - name: Clean Up S3 Resources
@@ -258,14 +248,13 @@ jobs:
 
             # Finally delete the bucket
             echo "🗑️ Deleting bucket..."
-            aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}
-            
-            echo "✅ S3 bucket cleanup completed"
+            if aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}; then
+              echo "S3_STATUS=✅" >> $GITHUB_ENV
+            else
+              echo "S3_STATUS=❌" >> $GITHUB_ENV
+            fi
           else
-            echo "ℹ️ Bucket not found or already deleted"
-          fi
-          if aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}; then
-            echo "S3_STATUS=✅" >> $GITHUB_ENV
+            echo "S3_STATUS=✅" >> $GITHUB_ENV  # Already deleted
           fi
 
       - name: Summarize Cleanup Status
