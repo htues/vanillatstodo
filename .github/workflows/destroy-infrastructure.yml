@@ -48,12 +48,10 @@ jobs:
       - name: Destroy EKS Resources
         id: eks_cleanup
         run: |
-          CLUSTER_NAME="vanillatstodo-cluster"
-
           # Check if cluster exists first
           echo "🔍 Checking if EKS cluster exists..."
-          if aws eks describe-cluster --name $CLUSTER_NAME >/dev/null 2>&1; then
-            echo "✅ Found EKS cluster: $CLUSTER_NAME"
+          if aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} >/dev/null 2>&1; then
+            echo "✅ Found EKS cluster: ${{ env.CLUSTER_NAME }}
 
             # Add required EKS permissions
             aws iam attach-role-policy \
@@ -61,33 +59,33 @@ jobs:
               --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
 
             echo "🔍 Checking for EKS node groups..."
-            NODE_GROUPS=$(aws eks list-nodegroups --cluster-name $CLUSTER_NAME --query 'nodegroups[*]' --output text || echo "")
+            NODE_GROUPS=$(aws eks list-nodegroups --cluster-name ${{ env.CLUSTER_NAME }} --query 'nodegroups[*]' --output text || echo "")
 
             if [ ! -z "$NODE_GROUPS" ]; then
               echo "Found node groups: $NODE_GROUPS"
               for ng in $NODE_GROUPS; do
                 echo "🗑️ Deleting node group: $ng"
-                aws eks delete-nodegroup --cluster-name $CLUSTER_NAME --nodegroup-name $ng
+                aws eks delete-nodegroup --cluster-name ${{ env.CLUSTER_NAME }} --nodegroup-name $ng
                 echo "⏳ Waiting for node group deletion..."
-                aws eks wait nodegroup-deleted --cluster-name $CLUSTER_NAME --nodegroup-name $ng
+                aws eks wait nodegroup-deleted --cluster-name ${{ env.CLUSTER_NAME }} --nodegroup-name $ng
               done
             fi
 
             echo "🗑️ Deleting EKS cluster..."
-            aws eks delete-cluster --name $CLUSTER_NAME
+            aws eks delete-cluster --name ${{ env.CLUSTER_NAME }}
             echo "⏳ Waiting for cluster deletion..."
-            aws eks wait cluster-deleted --name $CLUSTER_NAME
+            aws eks wait cluster-deleted --name ${{ env.CLUSTER_NAME }}
           else
             echo "ℹ️ EKS cluster does not exist, skipping..."
           fi
-          if aws eks delete-cluster --name $CLUSTER_NAME; then
+          if aws eks delete-cluster --name ${{ env.CLUSTER_NAME }}; then
               echo "EKS_STATUS=✅" >> $GITHUB_ENV
           else
               echo "EKS_STATUS=❌" >> $GITHUB_ENV
           fi
 
       - name: Clean Up Network Resources
-        if: network_cleanup
+        id: network_cleanup
         run: |
           echo "🔍 Finding DHCP Options Sets..."
           DHCP_IDS=$(aws ec2 describe-dhcp-options \
@@ -203,25 +201,23 @@ jobs:
       - name: Clean Up State Resources
         id: dynamodb_cleanup
         run: |
-          # DynamoDB Table Cleanup
-          TABLE_NAME="vanillatstodo-terraform-state-lock"
-          echo "🔍 Checking DynamoDB table: $TABLE_NAME"
+          echo "🔍 Checking DynamoDB table: ${{ env.TABLE_NAME }}"
 
           TABLE_STATUS=$(aws dynamodb describe-table \
-            --table-name $TABLE_NAME \
+            --table-name ${{ env.TABLE_NAME }} \
             --query 'Table.TableStatus' \
             --output text 2>/dev/null || echo "NOT_FOUND")
 
           if [ "$TABLE_STATUS" == "ACTIVE" ]; then
-            echo "📋 Found active table: $TABLE_NAME"
+            echo "📋 Found active table: ${{ env.TABLE_NAME }}"
             
             # Delete the table
             echo "🗑️ Deleting DynamoDB table..."
-            aws dynamodb delete-table --table-name $TABLE_NAME
+            aws dynamodb delete-table --table-name ${{ env.TABLE_NAME }}
             
             # Wait for deletion to complete
             echo "⏳ Waiting for table deletion..."
-            aws dynamodb wait table-not-exists --table-name $TABLE_NAME
+            aws dynamodb wait table-not-exists --table-name ${{ env.TABLE_NAME }}
             
             echo "✅ DynamoDB table deleted successfully"
           else
@@ -235,42 +231,40 @@ jobs:
       - name: Clean Up S3 Resources
         id: s3_cleanup
         run: |
-          BUCKET_NAME="vanillatstodo-terraform-state"
-
-          echo "🔍 Checking S3 bucket: $BUCKET_NAME"
-          if aws s3api head-bucket --bucket $BUCKET_NAME 2>/dev/null; then
-            echo "📦 Found bucket: $BUCKET_NAME"
+          echo "🔍 Checking S3 bucket: ${{ env.BUCKET_NAME }}"
+          if aws s3api head-bucket --bucket ${{ env.BUCKET_NAME }} 2>/dev/null; then
+            echo "📦 Found bucket: ${{ env.BUCKET_NAME }}"
             
             # First remove versioning
             echo "🔄 Disabling versioning..."
             aws s3api put-bucket-versioning \
-              --bucket $BUCKET_NAME \
+              --bucket ${{ env.BUCKET_NAME }} \
               --versioning-configuration Status=Suspended
 
             # Delete all versions and delete markers
             echo "🗑️ Removing all object versions..."
             aws s3api list-object-versions \
-              --bucket $BUCKET_NAME \
+              --bucket ${{ env.BUCKET_NAME }} \
               --output json \
               --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}} + {Quiet: `false`}' \
-              | aws s3api delete-objects --bucket $BUCKET_NAME --delete file:///dev/stdin || true
+              | aws s3api delete-objects --bucket ${{ env.BUCKET_NAME }} --delete file:///dev/stdin || true
 
             echo "🗑️ Removing delete markers..."
             aws s3api list-object-versions \
-              --bucket $BUCKET_NAME \
+              --bucket ${{ env.BUCKET_NAME }} \
               --output json \
               --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}} + {Quiet: `false`}' \
-              | aws s3api delete-objects --bucket $BUCKET_NAME --delete file:///dev/stdin || true
+              | aws s3api delete-objects --bucket ${{ env.BUCKET_NAME }} --delete file:///dev/stdin || true
 
             # Finally delete the bucket
             echo "🗑️ Deleting bucket..."
-            aws s3api delete-bucket --bucket $BUCKET_NAME
+            aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}
             
             echo "✅ S3 bucket cleanup completed"
           else
             echo "ℹ️ Bucket not found or already deleted"
           fi
-          if aws s3api delete-bucket --bucket $BUCKET_NAME; then
+          if aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}; then
             echo "S3_STATUS=✅" >> $GITHUB_ENV
           fi
 
