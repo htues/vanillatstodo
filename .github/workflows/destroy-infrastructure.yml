@@ -12,8 +12,19 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  CLUSTER_NAME: "vanillatstodo-cluster"
+  TABLE_NAME: "vanillatstodo-terraform-state-lock"
+  BUCKET_NAME: "vanillatstodo-terraform-state"
+  AWS_REGION: "us-east-2"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   destroy:
+    timeout-minutes: 30
     name: "Destroy Infrastructure"
     runs-on: ubuntu-latest
     if: ${{ github.event.inputs.confirmation == 'destroy' }}
@@ -241,3 +252,14 @@ jobs:
           else
             echo "ℹ️ Bucket not found or already deleted"
           fi
+
+      - name: Summarize Cleanup Status
+        if: always()
+        run: |
+          echo "### Cleanup Summary 🧹" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| -------- | ------ |" >> $GITHUB_STEP_SUMMARY
+          echo "| EKS Cluster | ${EKS_STATUS:-❌} |" >> $GITHUB_STEP_SUMMARY
+          echo "| VPC Resources | ${VPC_STATUS:-❌} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DynamoDB Table | ${DYNAMODB_STATUS:-❌} |" >> $GITHUB_STEP_SUMMARY
+          echo "| S3 Bucket | ${S3_STATUS:-❌} |" >> $GITHUB_STEP_SUMMARY
