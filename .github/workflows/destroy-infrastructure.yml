@@ -56,7 +56,8 @@ jobs:
             # Add required EKS permissions
             aws iam attach-role-policy \
               --role-name vanillatstodo-deployer \
-              --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+              --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy || \
+              echo "⚠️ Could not attach EKS policy - continuing anyway"
 
             echo "🔍 Checking for EKS node groups..."
             NODE_GROUPS=$(aws eks list-nodegroups --cluster-name ${{ env.CLUSTER_NAME }} --query 'nodegroups[*]' --output text || echo "")
