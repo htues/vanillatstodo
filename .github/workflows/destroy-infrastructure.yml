@@ -124,6 +124,23 @@ jobs:
           if [ "$VPC_ID" != "None" ]; then
             echo "Found VPC: $VPC_ID"
             
+            # Add Internet Gateway cleanup first
+            echo "🔍 Finding Internet Gateway..."
+            IGW_ID=$(aws ec2 describe-internet-gateways \
+              --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+              --query 'InternetGateways[0].InternetGatewayId' \
+              --output text)
+
+            if [ "$IGW_ID" != "None" ]; then
+              echo "🗑️ Detaching Internet Gateway: $IGW_ID"
+              aws ec2 detach-internet-gateway \
+                --internet-gateway-id $IGW_ID \
+                --vpc-id $VPC_ID
+
+              echo "🗑️ Deleting Internet Gateway..."
+              aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID
+            fi            
+
             # List all dependencies for debugging
             echo "📋 Listing VPC Dependencies..."
             aws ec2 describe-vpc-attribute --vpc-id $VPC_ID --attribute enableDnsSupport
