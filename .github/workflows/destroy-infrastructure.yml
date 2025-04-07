@@ -71,6 +71,37 @@ jobs:
 
       - name: Clean Up Network Resources
         run: |
+          echo "🔍 Finding DHCP Options Sets..."
+          DHCP_IDS=$(aws ec2 describe-dhcp-options \
+            --filters "Name=owner-id,Values=$(aws sts get-caller-identity --query 'Account' --output text)" \
+            --query 'DhcpOptions[*].DhcpOptionsId' --output text)
+
+          for DHCP_ID in $DHCP_IDS; do
+            echo "Checking DHCP Options Set: $DHCP_ID"
+            
+            # Check if it's associated with any VPCs
+            VPC_ASSOCIATIONS=$(aws ec2 describe-vpcs \
+              --filters "Name=dhcp-options-id,Values=$DHCP_ID" \
+              --query 'Vpcs[*].VpcId' --output text)
+            
+            if [ -n "$VPC_ASSOCIATIONS" ]; then
+              echo "⚠️ DHCP Options Set is associated with VPCs: $VPC_ASSOCIATIONS"
+              for vpc in $VPC_ASSOCIATIONS; do
+                echo "🔄 Associating VPC with default DHCP options..."
+                aws ec2 associate-dhcp-options --vpc-id $vpc --dhcp-options-id default
+              done
+            fi
+            
+            # Try to delete non-default DHCP options sets
+            if aws ec2 describe-dhcp-options \
+              --dhcp-options-ids $DHCP_ID \
+              --query 'DhcpOptions[0].Tags[?Key==`Name`].Value' \
+              --output text | grep -q "vanillatstodo"; then
+              echo "🗑️ Deleting custom DHCP Options Set..."
+              aws ec2 delete-dhcp-options --dhcp-options-id $DHCP_ID || true
+            fi
+          done
+
           echo "🔍 Finding VPC resources..."
           VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=*vanillatstodo*" --query 'Vpcs[0].VpcId' --output text)
 
