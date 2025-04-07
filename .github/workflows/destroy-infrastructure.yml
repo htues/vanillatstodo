@@ -38,7 +38,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-2
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
@@ -46,6 +46,7 @@ jobs:
           terraform_version: "1.7.0"
 
       - name: Destroy EKS Resources
+        id: eks_cleanup
         run: |
           CLUSTER_NAME="vanillatstodo-cluster"
 
@@ -79,8 +80,14 @@ jobs:
           else
             echo "ℹ️ EKS cluster does not exist, skipping..."
           fi
+          if aws eks delete-cluster --name $CLUSTER_NAME; then
+              echo "EKS_STATUS=✅" >> $GITHUB_ENV
+          else
+              echo "EKS_STATUS=❌" >> $GITHUB_ENV
+          fi
 
       - name: Clean Up Network Resources
+        if: network_cleanup
         run: |
           echo "🔍 Finding DHCP Options Sets..."
           DHCP_IDS=$(aws ec2 describe-dhcp-options \
@@ -187,8 +194,14 @@ jobs:
             sleep 30  # Wait for all deletions to complete
             aws ec2 delete-vpc --vpc-id $VPC_ID
           fi
+          if [ $? -eq 0 ]; then
+            echo "VPC_STATUS=✅" >> $GITHUB_ENV
+          else
+            echo "VPC_STATUS=❌" >> $GITHUB_ENV
+          fi
 
       - name: Clean Up State Resources
+        id: dynamodb_cleanup
         run: |
           # DynamoDB Table Cleanup
           TABLE_NAME="vanillatstodo-terraform-state-lock"
@@ -214,8 +227,13 @@ jobs:
           else
             echo "ℹ️ Table not found or already in deletion process"
           fi
+          if [ "$TABLE_STATUS" == "ACTIVE" ]; then
+            # ...existing code...
+            echo "DYNAMODB_STATUS=✅" >> $GITHUB_ENV
+          fi
 
       - name: Clean Up S3 Resources
+        id: s3_cleanup
         run: |
           BUCKET_NAME="vanillatstodo-terraform-state"
 
@@ -251,6 +269,9 @@ jobs:
             echo "✅ S3 bucket cleanup completed"
           else
             echo "ℹ️ Bucket not found or already deleted"
+          fi
+          if aws s3api delete-bucket --bucket $BUCKET_NAME; then
+            echo "S3_STATUS=✅" >> $GITHUB_ENV
           fi
 
       - name: Summarize Cleanup Status
