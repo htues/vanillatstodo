@@ -243,36 +243,45 @@ jobs:
           if aws s3api head-bucket --bucket ${{ env.BUCKET_NAME }} 2>/dev/null; then
             echo "📦 Found bucket: ${{ env.BUCKET_NAME }}"
             
-            # First remove versioning
+            # Disable versioning
             echo "🔄 Disabling versioning..."
             aws s3api put-bucket-versioning \
               --bucket ${{ env.BUCKET_NAME }} \
               --versioning-configuration Status=Suspended
 
-            # Delete all versions and delete markers
+            # Delete all versions
             echo "🗑️ Removing all object versions..."
-            aws s3api list-object-versions \
+            VERSIONS=$(aws s3api list-object-versions \
               --bucket ${{ env.BUCKET_NAME }} \
-              --output json \
-              --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}} + {Quiet: `false`}' \
-              | aws s3api delete-objects --bucket ${{ env.BUCKET_NAME }} --delete file:///dev/stdin || true
-
-            echo "🗑️ Removing delete markers..."
-            aws s3api list-object-versions \
-              --bucket ${{ env.BUCKET_NAME }} \
-              --output json \
-              --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}} + {Quiet: `false`}' \
-              | aws s3api delete-objects --bucket ${{ env.BUCKET_NAME }} --delete file:///dev/stdin || true
-
-            # Finally delete the bucket
-            echo "🗑️ Deleting bucket..."
-            if aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}; then
-              echo "S3_STATUS=✅" >> $GITHUB_ENV
-            else
-              echo "S3_STATUS=❌" >> $GITHUB_ENV
+              --query 'Versions[].{Key:Key,VersionId:VersionId}' \
+              --output json)
+            
+            if [ "$VERSIONS" != "[]" ] && [ "$VERSIONS" != "" ]; then
+              echo "$VERSIONS" | jq -c '{Objects: ., Quiet: false}' | \
+              aws s3api delete-objects --bucket ${{ env.BUCKET_NAME }} --delete file:///dev/stdin
             fi
+
+            # Delete markers
+            echo "🗑️ Removing delete markers..."
+            MARKERS=$(aws s3api list-object-versions \
+              --bucket ${{ env.BUCKET_NAME }} \
+              --query 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' \
+              --output json)
+            
+            if [ "$MARKERS" != "[]" ] && [ "$MARKERS" != "" ]; then
+              echo "$MARKERS" | jq -c '{Objects: ., Quiet: false}' | \
+              aws s3api delete-objects --bucket ${{ env.BUCKET_NAME }} --delete file:///dev/stdin
+            fi
+
+            # Delete bucket
+            echo "🗑️ Deleting bucket..."
+            aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}
+            
+            echo "✅ S3 bucket cleanup completed"
+            echo "S3_STATUS=✅" >> $GITHUB_ENV
           else
-            echo "S3_STATUS=✅" >> $GITHUB_ENV  # Already deleted
+            echo "ℹ️ Bucket not found or already deleted"
+            echo "S3_STATUS=✅" >> $GITHUB_ENV
           fi
 
       - name: Summarize Cleanup Status
