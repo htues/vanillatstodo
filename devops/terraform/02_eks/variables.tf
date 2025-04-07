@@ -1,7 +1,7 @@
 variable "kubernetes_version" {
   description = "Kubernetes version for the EKS cluster (must be supported by AWS)"
   type        = string
-  default     = "1.27"
+  default     = "1.31"
 
   validation {
     condition     = can(regex("^1\\.(2[3-7])$", var.kubernetes_version))
