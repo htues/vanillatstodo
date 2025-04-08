@@ -10,6 +10,7 @@ env:
   AWS_REGION: "us-east-2"
   CLUSTER_VERSION: "1.31"
   TF_VAR_region: "us-east-2"
+  TF_VAR_cluster_version: "1.31"
 
 jobs:
   deploy:
@@ -28,6 +29,15 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate Region
+        run: |
+          CURRENT_REGION=$(aws configure get region)
+          if [ "$CURRENT_REGION" != "${{ env.AWS_REGION }}" ]; then
+            echo "❌ Wrong region configured: $CURRENT_REGION. Must be ${{ env.AWS_REGION }}"
+            exit 1
+          fi
+          echo "✅ Region validated: ${{ env.AWS_REGION }}"
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
@@ -76,10 +86,18 @@ jobs:
         working-directory: devops/terraform/02_eks
         run: |
           terraform init
-          terraform plan -out=tfplan
+
+          # Validate EKS version
+          PLANNED_VERSION=$(terraform plan -no-color -out=tfplan | grep 'version.*=.*"1.31"' || echo "")
+          if [ -z "$PLANNED_VERSION" ]; then
+            echo "❌ EKS version 1.31 not configured correctly"
+            exit 1
+          fi
+
           terraform apply tfplan
         env:
           TF_VAR_environment: staging
+          TF_VAR_cluster_version: ${{ env.CLUSTER_VERSION }}
 
       - name: Deploy Monitoring
         working-directory: ./devops/terraform/03_monitoring
@@ -97,11 +115,24 @@ jobs:
         if: success()
         working-directory: ./devops/terraform/02_eks
         run: |
-          CLUSTER_STATUS=$(aws eks describe-cluster --name vanillatstodo-cluster --query 'cluster.status' --output text)
+          CLUSTER_INFO=$(aws eks describe-cluster --name vanillatstodo-cluster --region ${{ env.AWS_REGION }})
+          CLUSTER_STATUS=$(echo "$CLUSTER_INFO" | jq -r '.cluster.status')
+          CLUSTER_VERSION=$(echo "$CLUSTER_INFO" | jq -r '.cluster.version')
+
           if [ "$CLUSTER_STATUS" != "ACTIVE" ]; then
-            echo "Cluster is not active. Status: $CLUSTER_STATUS"
+            echo "❌ Cluster is not active. Status: $CLUSTER_STATUS"
             exit 1
           fi
+
+          if [ "$CLUSTER_VERSION" != "1.31" ]; then
+            echo "❌ Wrong cluster version: $CLUSTER_VERSION. Expected: 1.31"
+            exit 1
+          fi
+
+          echo "✅ EKS Cluster validated:"
+          echo "- Status: $CLUSTER_STATUS"
+          echo "- Version: $CLUSTER_VERSION"
+          echo "- Region: ${{ env.AWS_REGION }}"
 
       - name: Capture Outputs
         run: |
