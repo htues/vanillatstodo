@@ -11,6 +11,7 @@ env:
   CLUSTER_VERSION: "1.31"
   TF_VAR_region: "us-east-2"
   TF_VAR_cluster_version: "1.31"
+  PROJECT_NAME: "vanillatstodo"
 
 jobs:
   deploy:
@@ -83,21 +84,23 @@ jobs:
           terraform apply tfplan
 
       - name: Deploy EKS Layer
+        id: eks_deploy
         working-directory: devops/terraform/02_eks
         run: |
           terraform init
 
           # Validate EKS version
-          PLANNED_VERSION=$(terraform plan -no-color -out=tfplan | grep 'version.*=.*"1.31"' || echo "")
-          if [ -z "$PLANNED_VERSION" ]; then
-            echo "❌ EKS version 1.31 not configured correctly"
+          PLAN_OUTPUT=$(terraform plan -no-color -out=tfplan)
+          if ! echo "$PLAN_OUTPUT" | grep -q "version.*=.*\"${CLUSTER_VERSION}\""; then
+            echo "❌ EKS version ${CLUSTER_VERSION} not configured correctly"
             exit 1
           fi
 
-          terraform apply tfplan
-        env:
-          TF_VAR_environment: staging
-          TF_VAR_cluster_version: ${{ env.CLUSTER_VERSION }}
+          if ! terraform apply -auto-approve tfplan; then
+            echo "EKS_STATUS=❌" >> $GITHUB_ENV
+            exit 1
+          fi
+          echo "EKS_STATUS=✅" >> $GITHUB_ENV
 
       - name: Deploy Monitoring
         working-directory: ./devops/terraform/03_monitoring
@@ -134,22 +137,43 @@ jobs:
           echo "- Version: $CLUSTER_VERSION"
           echo "- Region: ${{ env.AWS_REGION }}"
 
-      - name: Capture Outputs
+      - name: Set Deployment Status
+        if: always()
         run: |
-          cd devops/terraform/02_eks
-          echo "EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name)" >> $GITHUB_ENV
-          cd ../01_network
-          echo "VPC_ID=$(terraform output -raw vpc_id)" >> $GITHUB_ENV
+          # Enhanced status checks with timeouts
+          check_resource() {
+            timeout 30s $1 || {
+              echo "$2=❌" >> $GITHUB_ENV
+              return 1
+            }
+            echo "$2=✅" >> $GITHUB_ENV
+          }
 
-      - name: Notify on Completion
+          # State Layer Check
+          check_resource "aws s3api head-bucket --bucket ${PROJECT_NAME}-terraform-state" "STATE_STATUS"
+
+          # Network Layer Check
+          check_resource "aws ec2 describe-vpcs --filters Name=tag:Name,Values=*${PROJECT_NAME}* --query 'length(Vpcs) > 0'" "NETWORK_STATUS"
+
+          # EKS Layer Check
+          check_resource "aws eks describe-cluster --name ${PROJECT_NAME}-cluster --query 'cluster.status' | grep -q ACTIVE" "EKS_STATUS"
+
+          # Monitoring Check
+          check_resource "aws cloudwatch describe-alarms --alarm-names ${PROJECT_NAME}-cluster-health" "MONITORING_STATUS"
+
+      - name: Summarize Deployment Status
+        if: always()
         run: |
-          echo "Infrastructure deployment completed"
-          echo "Environment: ${{ env.TF_VAR_environment }}"
-          echo "EKS Cluster: ${{ env.EKS_CLUSTER_NAME }}"
-          echo "VPC: ${{ env.VPC_ID }}"
-          echo "Timestamp: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          echo ""
-          echo "Deployment summary:"
-          echo "- State Layer: ✅"
-          echo "- Network Layer: ✅"
-          echo "- EKS Layer: ✅"
+          echo "### Infrastructure Deployment Summary 🏗️" >> $GITHUB_STEP_SUMMARY
+          echo "| Layer | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "| ----- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| State Layer | ${STATE_STATUS:-❌} | S3 & DynamoDB |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network Layer | ${NETWORK_STATUS:-❌} | VPC, Subnets, IGW |" >> $GITHUB_STEP_SUMMARY
+          echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: ${CLUSTER_VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Monitoring | ${MONITORING_STATUS:-❌} | CloudWatch Alarms |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Region: \`${AWS_REGION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: \`${TF_VAR_environment}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Project: \`${PROJECT_NAME}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Timestamp: \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`" >> $GITHUB_STEP_SUMMARY
