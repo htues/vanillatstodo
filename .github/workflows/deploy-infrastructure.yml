@@ -64,18 +64,14 @@ jobs:
           # Clean any existing state
           rm -rf .terraform*
 
-          # Initialize and verify
+          # Initialize and apply
           terraform init
-          echo "🔍 Verifying existing state infrastructure..."
-          if terraform plan -target=data.aws_s3_bucket.state_bucket -detailed-exitcode; then
-            echo "✅ State infrastructure exists"
-            terraform output infrastructure_verification
-          else
-            case $? in
-              1) echo "❌ Verification failed"; exit 1;;
-              2) echo "Creating state infrastructure...";;
-            esac
+          echo "🔍 Verifying state infrastructure..."
+          if ! terraform apply -auto-approve; then
+            echo "❌ State infrastructure deployment failed"
+            exit 1
           fi
+          echo "✅ State infrastructure verified/created"
 
       - name: Deploy Network Layer
         working-directory: devops/terraform/01_network
