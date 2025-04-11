@@ -68,6 +68,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state_logs" {
     id     = "cleanup_old_logs"
     status = "Enabled"
 
+    filter {
+      prefix = "state-bucket-logs/"
+    }
+
     expiration {
       days = 90
     }
