@@ -13,7 +13,6 @@ output "infrastructure_verification" {
     bucket_exists = data.aws_s3_bucket.state_bucket.id != ""
     bucket_arn    = data.aws_s3_bucket.state_bucket.arn
     region        = data.aws_s3_bucket.state_bucket.region
-    environment   = var.environment
   }
 
   description = "State infrastructure verification details"
