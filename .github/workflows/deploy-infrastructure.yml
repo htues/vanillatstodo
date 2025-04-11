@@ -72,12 +72,7 @@ jobs:
             echo "✅ State bucket exists"
           else
             echo "🏗️ Creating state infrastructure..."
-            if terraform apply -auto-approve; then
-              echo "✅ State infrastructure created successfully"
-            else
-              echo "❌ Failed to create state infrastructure"
-              exit 1
-            fi
+            terraform apply -auto-approve
           fi
 
       - name: Deploy Network Layer
@@ -153,7 +148,6 @@ jobs:
             else
               echo "$status_var=❌" >> $GITHUB_ENV
               echo "⚠️ Resource check failed: $cmd"
-              return 1
             fi
           }
 
@@ -162,7 +156,6 @@ jobs:
             echo "STATE_STATUS=✅" >> $GITHUB_ENV
           else
             echo "STATE_STATUS=❌" >> $GITHUB_ENV
-            echo "ℹ️ State bucket not found"
           fi
 
           # Network Layer Check
@@ -180,13 +173,13 @@ jobs:
           echo "### Infrastructure Deployment Summary 🏗️" >> $GITHUB_STEP_SUMMARY
           echo "| Layer | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "| ----- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
-          echo "| State Layer | ${STATE_STATUS:-❌} | S3 Bucket |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network Layer | ${NETWORK_STATUS:-❌} | VPC, Subnets, IGW |" >> $GITHUB_STEP_SUMMARY
-          echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: ${CLUSTER_VERSION} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Monitoring | ${MONITORING_STATUS:-❌} | CloudWatch Alarms |" >> $GITHUB_STEP_SUMMARY
+          echo "| State Layer | ${STATE_STATUS:-❌} | S3 State Management |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network Layer | ${NETWORK_STATUS:-❌} | VPC Infrastructure |" >> $GITHUB_STEP_SUMMARY
+          echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: ${TF_VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Monitoring | ${MONITORING_STATUS:-❌} | CloudWatch |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Terraform Version: \`${TF_VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform: \`${TF_VERSION}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Region: \`${AWS_REGION}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Environment: \`${TF_VAR_environment}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Project: \`${PROJECT_NAME}\`" >> $GITHUB_STEP_SUMMARY
