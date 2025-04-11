@@ -126,24 +126,30 @@ jobs:
         run: |
           echo "🔧 Deploying EKS layer..."
 
-          # Verify network state exists
+          # Clean any previous state
+          rm -rf .terraform*
+
+          # Verify network state
           if ! aws s3 ls "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"; then
             echo "❌ Network state not found"
             exit 1
           fi
 
-          # Show network outputs for debugging
-          echo "📊 Network outputs:"
-          aws s3 cp "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate" network.tfstate
-          terraform show network.tfstate
+          # Download and verify network state
+          aws s3 cp "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate" ./network.tfstate
 
-          # Initialize and deploy
+          # Initialize with required providers
           terraform init \
             -backend-config="bucket=${PROJECT_NAME}-terraform-state" \
             -backend-config="key=staging/eks.tfstate" \
             -backend-config="region=${AWS_REGION}" \
             -backend-config="encrypt=true"
 
+          # Show network outputs for debugging
+          echo "📊 Network state outputs:"
+          terraform show network.tfstate
+
+          # Plan and apply
           terraform plan -out=tfplan
           terraform apply tfplan
 
