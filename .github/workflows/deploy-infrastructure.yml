@@ -61,17 +61,24 @@ jobs:
       - name: Deploy State Resources
         working-directory: devops/terraform/00_state
         run: |
-          # Clean any existing state
+          # Clean existing state
           rm -rf .terraform*
 
-          # Initialize and apply
+          # Initialize Terraform
           terraform init
-          echo "🔍 Verifying state infrastructure..."
-          if ! terraform apply -auto-approve; then
-            echo "❌ State infrastructure deployment failed"
-            exit 1
+
+          echo "🔍 Checking state infrastructure..."
+          if aws s3api head-bucket --bucket ${PROJECT_NAME}-terraform-state 2>/dev/null; then
+            echo "✅ State bucket exists"
+          else
+            echo "🏗️ Creating state infrastructure..."
+            if terraform apply -auto-approve; then
+              echo "✅ State infrastructure created successfully"
+            else
+              echo "❌ Failed to create state infrastructure"
+              exit 1
+            fi
           fi
-          echo "✅ State infrastructure verified/created"
 
       - name: Deploy Network Layer
         working-directory: devops/terraform/01_network
