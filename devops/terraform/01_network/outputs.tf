@@ -10,10 +10,7 @@ output "vpc_cidr" {
 
 output "subnet_ids" {
   description = "IDs of the created subnets"
-  value = [
-    aws_subnet.subnet_a.id,
-    aws_subnet.subnet_b.id
-  ]
+  value       = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
 }
 
 output "subnet_cidrs" {
