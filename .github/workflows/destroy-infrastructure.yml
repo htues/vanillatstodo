@@ -14,9 +14,10 @@ permissions:
 
 env:
   CLUSTER_NAME: "vanillatstodo-cluster"
-  TABLE_NAME: "vanillatstodo-terraform-state-lock"
   BUCKET_NAME: "vanillatstodo-terraform-state"
   AWS_REGION: "us-east-2"
+  TF_VERSION: "1.10.0"
+  PROJECT_NAME: "vanillatstodo"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -43,7 +44,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
-          terraform_version: "1.7.0"
+          terraform_version: ${{ env.TF_VERSION }}
 
       - name: Destroy EKS Resources
         id: eks_cleanup
@@ -215,27 +216,6 @@ jobs:
             echo "VPC_STATUS=❌" >> $GITHUB_ENV
           fi
 
-      - name: Clean Up State Resources
-        id: dynamodb_cleanup
-        run: |
-          echo "🔍 Checking DynamoDB table: ${{ env.TABLE_NAME }}"
-
-          TABLE_STATUS=$(aws dynamodb describe-table \
-            --table-name ${{ env.TABLE_NAME }} \
-            --query 'Table.TableStatus' \
-            --output text 2>/dev/null || echo "NOT_FOUND")
-
-          if [ "$TABLE_STATUS" == "ACTIVE" ]; then
-            if aws dynamodb delete-table --table-name ${{ env.TABLE_NAME }}; then
-              aws dynamodb wait table-not-exists --table-name ${{ env.TABLE_NAME }}
-              echo "DYNAMODB_STATUS=✅" >> $GITHUB_ENV
-            else
-              echo "DYNAMODB_STATUS=❌" >> $GITHUB_ENV
-            fi
-          else
-            echo "DYNAMODB_STATUS=✅" >> $GITHUB_ENV  # Already deleted
-          fi
-
       - name: Clean Up S3 Resources
         id: s3_cleanup
         run: |
@@ -301,9 +281,14 @@ jobs:
         if: always()
         run: |
           echo "### Cleanup Summary 🧹" >> $GITHUB_STEP_SUMMARY
-          echo "| Resource | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "| -------- | ------ |" >> $GITHUB_STEP_SUMMARY
-          echo "| EKS Cluster | ${EKS_STATUS:-❌} |" >> $GITHUB_STEP_SUMMARY
-          echo "| VPC Resources | ${VPC_STATUS:-❌} |" >> $GITHUB_STEP_SUMMARY
-          echo "| DynamoDB Table | ${DYNAMODB_STATUS:-❌} |" >> $GITHUB_STEP_SUMMARY
-          echo "| S3 Bucket | ${S3_STATUS:-❌} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "| -------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: 1.31 |" >> $GITHUB_STEP_SUMMARY
+          echo "| VPC Resources | ${VPC_STATUS:-❌} | Network Stack |" >> $GITHUB_STEP_SUMMARY
+          echo "| S3 State | ${S3_STATUS:-❌} | Terraform State |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform Version: \`${TF_VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Region: \`${AWS_REGION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Project: \`${PROJECT_NAME}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Timestamp: \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`" >> $GITHUB_STEP_SUMMARY

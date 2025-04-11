@@ -6,6 +6,14 @@ on:
       - staging
   workflow_dispatch:
 
+env:
+  AWS_REGION: "us-east-2"
+  CLUSTER_VERSION: "1.31"
+  TF_VAR_region: "us-east-2"
+  TF_VAR_cluster_version: "1.31"
+  PROJECT_NAME: "vanillatstodo"
+  TF_VERSION: "1.10.0"
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -18,16 +26,25 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-2
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate Region
+        run: |
+          CURRENT_REGION=$(aws configure get region)
+          if [ "$CURRENT_REGION" != "${{ env.AWS_REGION }}" ]; then
+            echo "❌ Wrong region configured: $CURRENT_REGION. Must be ${{ env.AWS_REGION }}"
+            exit 1
+          fi
+          echo "✅ Region validated: ${{ env.AWS_REGION }}"
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v1
+        uses: hashicorp/setup-terraform@v2
         with:
-          terraform_version: "1.7.0" # Specify your desired version
+          terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
       - name: Test IAM Permissions
@@ -49,8 +66,7 @@ jobs:
           # Initialize and verify
           terraform init
           echo "🔍 Verifying existing state infrastructure..."
-          if terraform plan -target=data.aws_s3_bucket.state_bucket \
-             -target=data.aws_dynamodb_table.state_lock -detailed-exitcode; then
+          if terraform plan -target=data.aws_s3_bucket.state_bucket -detailed-exitcode; then
             echo "✅ State infrastructure exists"
             terraform output infrastructure_verification
           else
@@ -68,13 +84,23 @@ jobs:
           terraform apply tfplan
 
       - name: Deploy EKS Layer
+        id: eks_deploy
         working-directory: devops/terraform/02_eks
         run: |
           terraform init
-          terraform plan -out=tfplan
-          terraform apply tfplan
-        env:
-          TF_VAR_environment: staging
+
+          # Validate EKS version
+          PLAN_OUTPUT=$(terraform plan -no-color -out=tfplan)
+          if ! echo "$PLAN_OUTPUT" | grep -q "version.*=.*\"${CLUSTER_VERSION}\""; then
+            echo "❌ EKS version ${CLUSTER_VERSION} not configured correctly"
+            exit 1
+          fi
+
+          if ! terraform apply -auto-approve tfplan; then
+            echo "EKS_STATUS=❌" >> $GITHUB_ENV
+            exit 1
+          fi
+          echo "EKS_STATUS=✅" >> $GITHUB_ENV
 
       - name: Deploy Monitoring
         working-directory: ./devops/terraform/03_monitoring
@@ -83,37 +109,72 @@ jobs:
           terraform init \
             -backend-config="bucket=vanillatstodo-terraform-state" \
             -backend-config="key=staging/monitoring.tfstate" \
-            -backend-config="region=us-east-2"
+            -backend-config="region=${{ env.AWS_REGION }}"
           terraform validate
           terraform plan -out=tfplan
-          terraform apply -auto-approve tfplan
+          terraform apply tfplan
 
       - name: Verify EKS Deployment
         if: success()
         working-directory: ./devops/terraform/02_eks
         run: |
-          CLUSTER_STATUS=$(aws eks describe-cluster --name vanillatstodo-cluster --query 'cluster.status' --output text)
+          CLUSTER_INFO=$(aws eks describe-cluster --name vanillatstodo-cluster --region ${{ env.AWS_REGION }})
+          CLUSTER_STATUS=$(echo "$CLUSTER_INFO" | jq -r '.cluster.status')
+          CLUSTER_VERSION=$(echo "$CLUSTER_INFO" | jq -r '.cluster.version')
+
           if [ "$CLUSTER_STATUS" != "ACTIVE" ]; then
-            echo "Cluster is not active. Status: $CLUSTER_STATUS"
+            echo "❌ Cluster is not active. Status: $CLUSTER_STATUS"
             exit 1
           fi
 
-      - name: Capture Outputs
-        run: |
-          cd devops/terraform/02_eks
-          echo "EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name)" >> $GITHUB_ENV
-          cd ../01_network
-          echo "VPC_ID=$(terraform output -raw vpc_id)" >> $GITHUB_ENV
+          if [ "$CLUSTER_VERSION" != "1.31" ]; then
+            echo "❌ Wrong cluster version: $CLUSTER_VERSION. Expected: 1.31"
+            exit 1
+          fi
 
-      - name: Notify on Completion
+          echo "✅ EKS Cluster validated:"
+          echo "- Status: $CLUSTER_STATUS"
+          echo "- Version: $CLUSTER_VERSION"
+          echo "- Region: ${{ env.AWS_REGION }}"
+
+      - name: Set Deployment Status
+        if: always()
         run: |
-          echo "Infrastructure deployment completed"
-          echo "Environment: ${{ env.TF_VAR_environment }}"
-          echo "EKS Cluster: ${{ env.EKS_CLUSTER_NAME }}"
-          echo "VPC: ${{ env.VPC_ID }}"
-          echo "Timestamp: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          echo ""
-          echo "Deployment summary:"
-          echo "- State Layer: ✅"
-          echo "- Network Layer: ✅"
-          echo "- EKS Layer: ✅"
+          # Enhanced status checks with timeouts
+          check_resource() {
+            timeout 30s $1 || {
+              echo "$2=❌" >> $GITHUB_ENV
+              return 1
+            }
+            echo "$2=✅" >> $GITHUB_ENV
+          }
+
+          # State Layer Check
+          check_resource "aws s3api head-bucket --bucket ${PROJECT_NAME}-terraform-state" "STATE_STATUS"
+
+          # Network Layer Check
+          check_resource "aws ec2 describe-vpcs --filters Name=tag:Name,Values=*${PROJECT_NAME}* --query 'length(Vpcs) > 0'" "NETWORK_STATUS"
+
+          # EKS Layer Check
+          check_resource "aws eks describe-cluster --name ${PROJECT_NAME}-cluster --query 'cluster.status' | grep -q ACTIVE" "EKS_STATUS"
+
+          # Monitoring Check
+          check_resource "aws cloudwatch describe-alarms --alarm-names ${PROJECT_NAME}-cluster-health" "MONITORING_STATUS"
+
+      - name: Summarize Deployment Status
+        if: always()
+        run: |
+          echo "### Infrastructure Deployment Summary 🏗️" >> $GITHUB_STEP_SUMMARY
+          echo "| Layer | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "| ----- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| State Layer | ${STATE_STATUS:-❌} | S3 Bucket |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network Layer | ${NETWORK_STATUS:-❌} | VPC, Subnets, IGW |" >> $GITHUB_STEP_SUMMARY
+          echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: ${CLUSTER_VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Monitoring | ${MONITORING_STATUS:-❌} | CloudWatch Alarms |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform Version: \`${TF_VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Region: \`${AWS_REGION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: \`${TF_VAR_environment}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Project: \`${PROJECT_NAME}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Timestamp: \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`" >> $GITHUB_STEP_SUMMARY

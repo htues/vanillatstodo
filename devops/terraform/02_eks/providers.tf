@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.0.0"
+  required_version = ">= 1.10.0"
 
   required_providers {
     aws = {
@@ -9,11 +9,10 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "vanillatstodo-terraform-state"
-    key            = "staging/eks.tfstate"
-    region         = "us-east-2"
-    encrypt        = true
-    dynamodb_table = "vanillatstodo-terraform-state-lock"
+    bucket  = "vanillatstodo-terraform-state"
+    key     = "staging/eks.tfstate"
+    region  = "us-east-2"
+    encrypt = true
   }
 }
 
@@ -25,6 +24,7 @@ provider "aws" {
       Environment = var.environment
       Project     = "vanillatstodo"
       ManagedBy   = "terraform"
+      Version     = "1.10+"
     }
   }
 }
