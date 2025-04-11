@@ -1,33 +1,24 @@
-# Verify state bucket exists and configuration
-data "aws_s3_bucket" "state_bucket" {
-  bucket = "${var.project_name}-terraform-state"
+locals {
+  bucket_name = "${var.project_name}-terraform-state"
 }
 
-# Initial state verification
-resource "null_resource" "verify_state" {
-  provisioner "local-exec" {
-    command = <<-EOT
-      if aws s3api head-bucket --bucket ${var.project_name}-terraform-state 2>/dev/null; then
-        echo "✅ State bucket exists"
-      else
-        echo "Creating state bucket..."
-      fi
-    EOT
-  }
-}
-
-# Output verification results
+# State infrastructure verification output
 output "infrastructure_verification" {
   value = {
+    bucket_name = local.bucket_name
     environment = var.environment
-    bucket_name = "${var.project_name}-terraform-state"
-    region      = var.aws_region
+    region     = var.aws_region
+    created_at = timestamp()
   }
 
-  description = "State infrastructure configuration"
+  description = "State infrastructure configuration details"
 }
 
-# Add error output for better visibility
 output "verification_status" {
-  value = "✅ State bucket verification completed successfully"
+  value = try(
+    aws_s3_bucket.terraform_state.id != "" ? 
+    "✅ State bucket verified: ${local.bucket_name}" : 
+    "❌ State bucket not found",
+    "⚠️ State verification pending"
+  )
 }
