@@ -1,6 +1,6 @@
 # Verify state bucket exists
 data "aws_s3_bucket" "state_bucket" {
-  bucket = "vanillatstodo-terraform-state"
+  bucket = "${var.project_name}-terraform-state"
 }
 
 data "aws_s3_bucket_versioning" "state_bucket" {
@@ -13,5 +13,8 @@ output "infrastructure_verification" {
     bucket_exists = data.aws_s3_bucket.state_bucket.id != ""
     bucket_arn    = data.aws_s3_bucket.state_bucket.arn
     region        = data.aws_s3_bucket.state_bucket.region
+    environment   = var.environment
   }
+
+  description = "State infrastructure verification details"
 }

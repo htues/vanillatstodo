@@ -9,6 +9,12 @@ variable "environment" {
   }
 }
 
+variable "project_name" {
+  description = "Project identifier"
+  type        = string
+  default     = "vanillatstodo"
+}
+
 variable "aws_region" {
   description = "AWS region where resources will be created"
   type        = string
