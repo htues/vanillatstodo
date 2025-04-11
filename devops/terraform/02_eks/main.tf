@@ -57,7 +57,8 @@ resource "aws_eks_cluster" "main" {
 
 # Add security group for EKS
 resource "aws_security_group" "eks_cluster" {
-  name_prefix = "${var.environment}-${var.cluster_name}-sg"
+  name        = "${var.environment}-${var.cluster_name}-sg"
+  description = "Security group for EKS cluster"
   vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
 
   egress {
