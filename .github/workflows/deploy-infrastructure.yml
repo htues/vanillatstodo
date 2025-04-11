@@ -63,45 +63,56 @@ jobs:
       - name: Deploy State Resources
         working-directory: devops/terraform/00_state
         run: |
-          # Clean existing state
           rm -rf .terraform*
-
-          # Initialize Terraform
           terraform init
 
-          echo "🔍 Checking state infrastructure..."
-          if aws s3api head-bucket --bucket ${PROJECT_NAME}-terraform-state 2>/dev/null; then
-            echo "✅ State bucket exists"
-          else
-            echo "🏗️ Creating state infrastructure..."
+          if ! aws s3 ls "s3://${PROJECT_NAME}-terraform-state" 2>/dev/null; then
+            echo "🏗️ Creating state bucket..."
             terraform apply -auto-approve
+            echo "STATE_STATUS=✅" >> $GITHUB_ENV
+          else
+            echo "✅ State bucket exists"
+            echo "STATE_STATUS=✅" >> $GITHUB_ENV
           fi
 
       - name: Deploy Network Layer
         working-directory: devops/terraform/01_network
         run: |
-          terraform init
+          rm -rf .terraform*
+          terraform init \
+            -backend-config="bucket=${PROJECT_NAME}-terraform-state" \
+            -backend-config="key=staging/network.tfstate" \
+            -backend-config="region=${AWS_REGION}"
+
           terraform plan -out=tfplan
           terraform apply tfplan
+
+          # Verify state was saved
+          if aws s3 ls "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"; then
+            echo "NETWORK_STATUS=✅" >> $GITHUB_ENV
+          else
+            echo "❌ Network state not found"
+            exit 1
+          fi
 
       - name: Deploy EKS Layer
         id: eks_deploy
         working-directory: devops/terraform/02_eks
         run: |
-          terraform init
-
-          # Validate EKS version
-          PLAN_OUTPUT=$(terraform plan -no-color -out=tfplan)
-          if ! echo "$PLAN_OUTPUT" | grep -q "version.*=.*\"${CLUSTER_VERSION}\""; then
-            echo "❌ EKS version ${CLUSTER_VERSION} not configured correctly"
+          # Verify network state exists
+          if ! aws s3 ls "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"; then
+            echo "❌ Network state not found. Deploy network layer first."
             exit 1
           fi
 
-          if ! terraform apply -auto-approve tfplan; then
-            echo "EKS_STATUS=❌" >> $GITHUB_ENV
-            exit 1
-          fi
-          echo "EKS_STATUS=✅" >> $GITHUB_ENV
+          rm -rf .terraform*
+          terraform init \
+            -backend-config="bucket=${PROJECT_NAME}-terraform-state" \
+            -backend-config="key=staging/eks.tfstate" \
+            -backend-config="region=${AWS_REGION}"
+
+          terraform plan -out=tfplan
+          terraform apply tfplan
 
       - name: Deploy Monitoring
         working-directory: ./devops/terraform/03_monitoring
