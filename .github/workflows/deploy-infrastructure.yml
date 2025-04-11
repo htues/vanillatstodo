@@ -78,41 +78,45 @@ jobs:
       - name: Deploy Network Layer
         working-directory: devops/terraform/01_network
         run: |
-          rm -rf .terraform*
+          echo "🔧 Initializing network deployment..."
+
+          # Initialize with explicit backend config
           terraform init \
             -backend-config="bucket=${PROJECT_NAME}-terraform-state" \
             -backend-config="key=staging/network.tfstate" \
-            -backend-config="region=${AWS_REGION}"
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true"
 
+          # Deploy network infrastructure
           terraform plan -out=tfplan
-          terraform apply tfplan
+          terraform apply -auto-approve tfplan
 
-          # Verify state was saved
+          # Verify state file exists in S3
           if aws s3 ls "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"; then
-            echo "NETWORK_STATUS=✅" >> $GITHUB_ENV
+            echo "✅ Network state saved successfully"
           else
-            echo "❌ Network state not found"
+            echo "❌ Network state not found in S3"
             exit 1
           fi
 
       - name: Deploy EKS Layer
-        id: eks_deploy
         working-directory: devops/terraform/02_eks
         run: |
-          # Verify network state exists
-          if ! aws s3 ls "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"; then
-            echo "❌ Network state not found. Deploy network layer first."
-            exit 1
-          fi
+          echo "🔧 Initializing EKS deployment..."
 
-          rm -rf .terraform*
+          # Wait for network state to be available
+          sleep 10
+
+          # Initialize with explicit backend config
           terraform init \
             -backend-config="bucket=${PROJECT_NAME}-terraform-state" \
             -backend-config="key=staging/eks.tfstate" \
-            -backend-config="region=${AWS_REGION}"
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true"
 
+          # Deploy EKS infrastructure
           terraform plan -out=tfplan
-          terraform apply tfplan
+          terraform apply -auto-approve tfplan
 
       - name: Deploy Monitoring
         working-directory: ./devops/terraform/03_monitoring
