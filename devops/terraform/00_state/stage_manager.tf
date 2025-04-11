@@ -8,6 +8,7 @@ resource "aws_s3_bucket" "terraform_state" {
   tags = {
     Name        = "Terraform State"
     Environment = var.environment
+    Project     = var.project_name
     ManagedBy   = "terraform"
   }
 }
