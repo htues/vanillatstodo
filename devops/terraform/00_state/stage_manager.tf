@@ -1,5 +1,6 @@
+# Main state bucket
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = "${var.project_name}-terraform-state"
+  bucket = local.bucket_name
 
   lifecycle {
     prevent_destroy = true
@@ -13,6 +14,7 @@ resource "aws_s3_bucket" "terraform_state" {
   }
 }
 
+# Enable versioning
 resource "aws_s3_bucket_versioning" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
   versioning_configuration {
@@ -20,6 +22,7 @@ resource "aws_s3_bucket_versioning" "terraform_state" {
   }
 }
 
+# Block public access
 resource "aws_s3_bucket_public_access_block" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -29,6 +32,7 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
   restrict_public_buckets = true
 }
 
+# Enable encryption
 resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -40,27 +44,31 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" 
   }
 }
 
-# Create separate logging bucket
+# State logs bucket
 resource "aws_s3_bucket" "terraform_state_logs" {
-  bucket = "${var.project_name}-terraform-state-logs"
+  bucket = "${local.bucket_name}-logs"
 
   tags = {
     Name        = "${var.environment}-terraform-state-logs"
     Environment = var.environment
-    Layer       = "state"
+    Layer       = "state-logs"
     ManagedBy   = "terraform"
+  }
+
+  lifecycle {
+    prevent_destroy = false # Logs can be recreated
   }
 }
 
-# Configure logging to separate bucket
+# Enable logging
 resource "aws_s3_bucket_logging" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
   target_bucket = aws_s3_bucket.terraform_state_logs.id
-  target_prefix = "state-bucket-logs/"
+  target_prefix = "${var.environment}/state-bucket-logs/"
 }
 
-# Add lifecycle policy for logs
+# Log retention policy
 resource "aws_s3_bucket_lifecycle_configuration" "terraform_state_logs" {
   bucket = aws_s3_bucket.terraform_state_logs.id
 
@@ -69,11 +77,34 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state_logs" {
     status = "Enabled"
 
     filter {
-      prefix = "state-bucket-logs/"
+      prefix = "${var.environment}/state-bucket-logs/"
     }
 
     expiration {
       days = 90
     }
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
   }
+}
+
+# Add bucket policy for logging
+resource "aws_s3_bucket_policy" "terraform_state_logs" {
+  bucket = aws_s3_bucket.terraform_state_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowStateLogging"
+        Effect    = "Allow"
+        Principal = { Service = "logging.s3.amazonaws.com" }
+        Action    = ["s3:PutObject"]
+        Resource  = ["${aws_s3_bucket.terraform_state_logs.arn}/*"]
+      }
+    ]
+  })
 }
