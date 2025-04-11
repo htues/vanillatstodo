@@ -124,21 +124,28 @@ jobs:
       - name: Deploy EKS Layer
         working-directory: devops/terraform/02_eks
         run: |
-          echo "🔧 Initializing EKS deployment..."
+          echo "🔧 Deploying EKS layer..."
 
-          # Wait for network state to be available
-          sleep 10
+          # Verify network state exists
+          if ! aws s3 ls "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"; then
+            echo "❌ Network state not found"
+            exit 1
+          fi
 
-          # Initialize with explicit backend config
+          # Show network outputs for debugging
+          echo "📊 Network outputs:"
+          aws s3 cp "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate" network.tfstate
+          terraform show network.tfstate
+
+          # Initialize and deploy
           terraform init \
             -backend-config="bucket=${PROJECT_NAME}-terraform-state" \
             -backend-config="key=staging/eks.tfstate" \
             -backend-config="region=${AWS_REGION}" \
             -backend-config="encrypt=true"
 
-          # Deploy EKS infrastructure
           terraform plan -out=tfplan
-          terraform apply -auto-approve tfplan
+          terraform apply tfplan
 
       - name: Deploy Monitoring
         working-directory: ./devops/terraform/03_monitoring
