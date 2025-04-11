@@ -6,7 +6,6 @@ data "terraform_remote_state" "network" {
     key            = "staging/network.tfstate"
     region         = "us-east-2"
     encrypt        = true
-    dynamodb_table = "vanillatstodo-terraform-state-lock"
   }
 
   workspace = terraform.workspace
@@ -53,6 +52,7 @@ resource "aws_eks_cluster" "main" {
     subnet_ids              = data.terraform_remote_state.network.outputs.subnet_ids
     endpoint_private_access = true
     endpoint_public_access  = true
+    security_group_ids     = [aws_security_group.eks_cluster.id]  # Add explicit security group
   }
 
   depends_on = [
@@ -62,6 +62,26 @@ resource "aws_eks_cluster" "main" {
 
   tags = {
     Name        = "${var.environment}-${var.cluster_name}"
+    Environment = var.environment
+    ManagedBy   = "terraform"
+    Version     = "1.31"    
+  }
+}
+
+# Add security group for EKS
+resource "aws_security_group" "eks_cluster" {
+  name_prefix = "${var.environment}-${var.cluster_name}-sg"
+  vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.environment}-${var.cluster_name}-sg"
     Environment = var.environment
   }
 }
