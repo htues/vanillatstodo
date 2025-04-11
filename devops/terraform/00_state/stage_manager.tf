@@ -56,7 +56,7 @@ resource "aws_s3_bucket" "terraform_state_logs" {
   }
 
   lifecycle {
-    prevent_destroy = false  # Logs can be recreated
+    prevent_destroy = false # Logs can be recreated
   }
 }
 
