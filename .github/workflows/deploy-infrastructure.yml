@@ -184,3 +184,4 @@ jobs:
           echo "- Environment: \`${TF_VAR_environment}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Project: \`${PROJECT_NAME}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Timestamp: \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`" >> $GITHUB_STEP_SUMMARY
+          echo "| ----- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
