@@ -1,14 +1,14 @@
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = "vanillatstodo-terraform-state"
+  bucket = "${var.project_name}-terraform-state"
 
   lifecycle {
     prevent_destroy = true
   }
 
   tags = {
-    Name        = "Terraform State"
+    Name        = "${var.environment}-terraform-state"
     Environment = var.environment
-    Project     = var.project_name
+    Layer       = "state"
     ManagedBy   = "terraform"
   }
 }
@@ -29,7 +29,6 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
   restrict_public_buckets = true
 }
 
-# Enable server-side encryption
 resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -37,13 +36,40 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" 
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
     }
+    bucket_key_enabled = true
   }
 }
 
-# Optional: Enable logging
+# Create separate logging bucket
+resource "aws_s3_bucket" "terraform_state_logs" {
+  bucket = "${var.project_name}-terraform-state-logs"
+
+  tags = {
+    Name        = "${var.environment}-terraform-state-logs"
+    Environment = var.environment
+    Layer       = "state"
+    ManagedBy   = "terraform"
+  }
+}
+
+# Configure logging to separate bucket
 resource "aws_s3_bucket_logging" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
-  target_bucket = aws_s3_bucket.terraform_state.id
-  target_prefix = "log/"
+  target_bucket = aws_s3_bucket.terraform_state_logs.id
+  target_prefix = "state-bucket-logs/"
+}
+
+# Add lifecycle policy for logs
+resource "aws_s3_bucket_lifecycle_configuration" "terraform_state_logs" {
+  bucket = aws_s3_bucket.terraform_state_logs.id
+
+  rule {
+    id     = "cleanup_old_logs"
+    status = "Enabled"
+
+    expiration {
+      days = 90
+    }
+  }
 }

@@ -9,12 +9,6 @@ variable "environment" {
   }
 }
 
-variable "project_name" {
-  description = "Project identifier"
-  type        = string
-  default     = "vanillatstodo"
-}
-
 variable "aws_region" {
   description = "AWS region where resources will be created"
   type        = string
@@ -55,15 +49,4 @@ variable "enable_dns" {
   description = "Enable DNS support and DNS hostnames in VPC"
   type        = bool
   default     = true
-}
-
-variable "cluster_name" {
-  description = "Name of the EKS cluster"
-  type        = string
-  default     = "vanillatstodo-cluster"
-
-  validation {
-    condition     = can(regex("^[a-z0-9-]+$", var.cluster_name))
-    error_message = "Cluster name must consist of lower case alphanumeric characters and hyphens only."
-  }
 }

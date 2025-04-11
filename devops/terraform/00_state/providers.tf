@@ -7,13 +7,6 @@ terraform {
       version = "~> 5.0"
     }
   }
-
-  backend "s3" {
-    bucket = "vanillatstodo-terraform-state"
-    key    = "network/terraform.tfstate"
-    region = "us-east-2"
-    encrypt = true
-  }
 }
 
 provider "aws" {
@@ -22,8 +15,8 @@ provider "aws" {
   default_tags {
     tags = {
       Environment = var.environment
-      Layer      = "network"
-      ManagedBy  = "terraform"
+      Project     = var.project_name
+      ManagedBy   = "terraform"
     }
   }
 }
