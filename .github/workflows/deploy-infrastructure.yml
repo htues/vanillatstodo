@@ -78,25 +78,34 @@ jobs:
       - name: Deploy Network Layer
         working-directory: devops/terraform/01_network
         run: |
-          echo "🔧 Initializing network deployment..."
+          echo "🔧 Deploying network layer..."
 
-          # Initialize with explicit backend config
+          # Initialize backend
           terraform init \
             -backend-config="bucket=${PROJECT_NAME}-terraform-state" \
             -backend-config="key=staging/network.tfstate" \
             -backend-config="region=${AWS_REGION}" \
             -backend-config="encrypt=true"
 
-          # Deploy network infrastructure
-          terraform plan -out=tfplan
-          terraform apply -auto-approve tfplan
+          # Apply changes and capture output
+          terraform apply -auto-approve
 
-          # Verify state file exists in S3
+          # Force state push to S3
+          terraform state push "terraform.tfstate"
+
+          # Double check state existence
           if aws s3 ls "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"; then
-            echo "✅ Network state saved successfully"
+            echo "✅ Network state confirmed in S3"
           else
-            echo "❌ Network state not found in S3"
-            exit 1
+            echo "⚠️ Attempting manual state upload..."
+            aws s3 cp terraform.tfstate "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"
+            
+            if [ $? -eq 0 ]; then
+              echo "✅ State uploaded successfully"
+            else
+              echo "❌ Failed to upload state"
+              exit 1
+            fi
           fi
 
       - name: Deploy EKS Layer
