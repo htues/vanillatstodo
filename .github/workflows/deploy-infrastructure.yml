@@ -8,11 +8,11 @@ on:
 
 env:
   AWS_REGION: "us-east-2"
-  CLUSTER_VERSION: "1.31"
-  TF_VAR_region: "us-east-2"
-  TF_VAR_cluster_version: "1.31"
+  CLUSTER_NAME: "vanillatstodo-cluster"
+  BUCKET_NAME: "vanillatstodo-terraform-state"
   PROJECT_NAME: "vanillatstodo"
   TF_VERSION: "1.10.0"
+  TF_VAR_environment: "staging"
 
 jobs:
   deploy:
@@ -141,37 +141,35 @@ jobs:
       - name: Set Deployment Status
         if: always()
         run: |
-          # Enhanced status checks with timeouts and error handling
           check_resource() {
-            if timeout 30s $1 2>/dev/null; then
-              echo "$2=✅" >> $GITHUB_ENV
+            local cmd="$1"
+            local status_var="$2"
+            if eval "$cmd" > /dev/null 2>&1; then
+              echo "$status_var=✅" >> $GITHUB_ENV
+              return 0
             else
-              echo "$2=❌" >> $GITHUB_ENV
-              echo "⚠️ Resource check failed: $1"
+              echo "$status_var=❌" >> $GITHUB_ENV
+              echo "⚠️ Resource check failed: $cmd"
+              return 1
             fi
           }
 
-          # State Layer Check - Skip if bucket doesn't exist yet
+          # State Layer Check
           if aws s3api head-bucket --bucket ${{ env.BUCKET_NAME }} 2>/dev/null; then
-            check_resource "aws s3api head-bucket --bucket ${{ env.BUCKET_NAME }}" "STATE_STATUS"
-          else
             echo "STATE_STATUS=✅" >> $GITHUB_ENV
-            echo "ℹ️ State bucket doesn't exist yet - marking as success"
+          else
+            echo "STATE_STATUS=❌" >> $GITHUB_ENV
+            echo "ℹ️ State bucket not found"
           fi
 
-          # Network Layer Check with enhanced error handling
-          check_resource "aws ec2 describe-vpcs --filters Name=tag:Name,Values=*${{ env.PROJECT_NAME }}* --query 'length(Vpcs) >= 0'" "NETWORK_STATUS"
+          # Network Layer Check
+          check_resource "aws ec2 describe-vpcs --filters Name=tag:Name,Values=*${{ env.PROJECT_NAME }}*" "NETWORK_STATUS"
 
           # EKS Layer Check
-          check_resource "aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query 'cluster.status' 2>/dev/null || echo 'PENDING'" "EKS_STATUS"
+          check_resource "aws eks describe-cluster --name ${{ env.CLUSTER_NAME }}" "EKS_STATUS"
 
-          # Monitoring Check - Skip if alarms don't exist yet
-          if aws cloudwatch describe-alarms --alarm-names ${{ env.PROJECT_NAME }}-cluster-health 2>/dev/null; then
-            check_resource "aws cloudwatch describe-alarms --alarm-names ${{ env.PROJECT_NAME }}-cluster-health" "MONITORING_STATUS"
-          else
-            echo "MONITORING_STATUS=✅" >> $GITHUB_ENV
-            echo "ℹ️ Monitoring alarms don't exist yet - marking as success"
-          fi
+          # Monitoring Check
+          check_resource "aws cloudwatch describe-alarms --alarm-names ${{ env.PROJECT_NAME }}-cluster-health" "MONITORING_STATUS" || true
 
       - name: Summarize Deployment Status
         if: always()
