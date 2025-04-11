@@ -223,42 +223,54 @@ jobs:
           if aws s3api head-bucket --bucket ${{ env.BUCKET_NAME }} 2>/dev/null; then
             echo "📦 Found bucket: ${{ env.BUCKET_NAME }}"
             
-            # Disable versioning first
-            echo "🔄 Disabling versioning..."
-            aws s3api put-bucket-versioning \
-              --bucket ${{ env.BUCKET_NAME }} \
-              --versioning-configuration Status=Suspended
-
-            # Delete all objects including versions
-            echo "🗑️ Deleting all objects..."
+            # List and delete all versions
+            echo "🗑️ Deleting all object versions..."
             aws s3api list-object-versions \
               --bucket ${{ env.BUCKET_NAME }} \
-              --output json \
-              --query '{Objects: [{Key: Versions[].Key, VersionId: Versions[].VersionId}]}' \
-              2>/dev/null | \
-            jq -c '.Objects[]' | \
-            while read -r object; do
-              KEY=$(echo "$object" | jq -r '.Key')
-              VERSION=$(echo "$object" | jq -r '.VersionId')
-              echo "Deleting object: $KEY version: $VERSION"
+              --output json | \
+            jq -r '.Versions[]? | "\(.Key)\t\(.VersionId)"' | \
+            while IFS=$'\t' read -r key version; do
+              echo "Deleting key: $key version: $version"
               aws s3api delete-object \
                 --bucket ${{ env.BUCKET_NAME }} \
-                --key "$KEY" \
-                --version-id "$VERSION" || true
+                --key "$key" \
+                --version-id "$version"
             done
 
-            # Force delete all remaining objects
-            echo "🗑️ Force cleaning bucket..."
-            aws s3 rm s3://${{ env.BUCKET_NAME }} --recursive
+            # Delete delete markers
+            echo "🗑️ Cleaning up delete markers..."
+            aws s3api list-object-versions \
+              --bucket ${{ env.BUCKET_NAME }} \
+              --output json | \
+            jq -r '.DeleteMarkers[]? | "\(.Key)\t\(.VersionId)"' | \
+            while IFS=$'\t' read -r key version; do
+              echo "Removing delete marker: $key version: $version"
+              aws s3api delete-object \
+                --bucket ${{ env.BUCKET_NAME }} \
+                --key "$key" \
+                --version-id "$version"
+            done
 
-            # Final bucket deletion
-            echo "🗑️ Deleting bucket..."
-            sleep 5  # Wait for deletions to complete
-            if aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}; then
-              echo "✅ S3 bucket deleted successfully"
-              echo "S3_STATUS=✅" >> $GITHUB_ENV
+            # Final verification and bucket deletion
+            echo "🔍 Verifying bucket is empty..."
+            sleep 5
+            
+            REMAINING=$(aws s3api list-object-versions \
+              --bucket ${{ env.BUCKET_NAME }} \
+              --output json | \
+              jq '.Versions + .DeleteMarkers | length')
+
+            if [ "$REMAINING" = "0" ]; then
+              echo "🗑️ Deleting empty bucket..."
+              if aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}; then
+                echo "✅ S3 bucket deleted successfully"
+                echo "S3_STATUS=✅" >> $GITHUB_ENV
+              else
+                echo "❌ Failed to delete bucket"
+                echo "S3_STATUS=❌" >> $GITHUB_ENV
+              fi
             else
-              echo "❌ Failed to delete S3 bucket"
+              echo "⚠️ Bucket still contains objects"
               echo "S3_STATUS=❌" >> $GITHUB_ENV
             fi
           else
