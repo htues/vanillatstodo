@@ -9,10 +9,10 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "vanillatstodo-terraform-state"
-    key            = "staging/eks.tfstate"
-    region         = "us-east-2"
-    encrypt        = true
+    bucket  = "vanillatstodo-terraform-state"
+    key     = "staging/eks.tfstate"
+    region  = "us-east-2"
+    encrypt = true
   }
 }
 
