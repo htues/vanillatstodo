@@ -87,25 +87,38 @@ jobs:
             -backend-config="region=${AWS_REGION}" \
             -backend-config="encrypt=true"
 
-          # Apply changes and capture output
-          terraform apply -auto-approve
+          # Plan and apply
+          terraform plan -out=tfplan
+          terraform apply tfplan
 
-          # Force state push to S3
-          terraform state push "terraform.tfstate"
-
-          # Double check state existence
-          if aws s3 ls "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"; then
-            echo "✅ Network state confirmed in S3"
+          # Get state location
+          STATE_FILE=$(terraform workspace show)
+          if [ -f ".terraform/terraform.tfstate" ]; then
+            STATE_PATH=".terraform/terraform.tfstate"
+          elif [ -f "terraform.tfstate" ]; then
+            STATE_PATH="terraform.tfstate"
           else
-            echo "⚠️ Attempting manual state upload..."
-            aws s3 cp terraform.tfstate "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"
+            echo "❌ Cannot find state file"
+            exit 1
+          fi
+
+          # Upload state to S3
+          echo "📤 Uploading state to S3..."
+          aws s3 cp "${STATE_PATH}" "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"
+
+          if [ $? -eq 0 ]; then
+            echo "✅ State uploaded successfully"
             
-            if [ $? -eq 0 ]; then
-              echo "✅ State uploaded successfully"
+            # Verify state file in S3
+            if aws s3 ls "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"; then
+              echo "✅ State file verified in S3"
             else
-              echo "❌ Failed to upload state"
+              echo "❌ State file not found in S3 after upload"
               exit 1
             fi
+          else
+            echo "❌ Failed to upload state"
+            exit 1
           fi
 
       - name: Deploy EKS Layer
