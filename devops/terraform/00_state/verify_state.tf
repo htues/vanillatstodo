@@ -21,7 +21,7 @@ output "infrastructure_verification" {
   value = {
     environment = var.environment
     bucket_name = "${var.project_name}-terraform-state"
-    region     = var.aws_region
+    region      = var.aws_region
   }
 
   description = "State infrastructure configuration"
