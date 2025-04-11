@@ -12,6 +12,7 @@ env:
   TF_VAR_region: "us-east-2"
   TF_VAR_cluster_version: "1.31"
   PROJECT_NAME: "vanillatstodo"
+  TF_VERSION: "1.10.0"
 
 jobs:
   deploy:
@@ -43,7 +44,7 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
         with:
-          terraform_version: "1.7.0" # Specify your desired version
+          terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
       - name: Test IAM Permissions
@@ -65,8 +66,7 @@ jobs:
           # Initialize and verify
           terraform init
           echo "🔍 Verifying existing state infrastructure..."
-          if terraform plan -target=data.aws_s3_bucket.state_bucket \
-             -target=data.aws_dynamodb_table.state_lock -detailed-exitcode; then
+          if terraform plan -target=data.aws_s3_bucket.state_bucket -detailed-exitcode; then
             echo "✅ State infrastructure exists"
             terraform output infrastructure_verification
           else
@@ -112,7 +112,7 @@ jobs:
             -backend-config="region=${{ env.AWS_REGION }}"
           terraform validate
           terraform plan -out=tfplan
-          terraform apply -auto-approve tfplan
+          terraform apply tfplan
 
       - name: Verify EKS Deployment
         if: success()
@@ -167,12 +167,13 @@ jobs:
           echo "### Infrastructure Deployment Summary 🏗️" >> $GITHUB_STEP_SUMMARY
           echo "| Layer | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "| ----- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
-          echo "| State Layer | ${STATE_STATUS:-❌} | S3 & DynamoDB |" >> $GITHUB_STEP_SUMMARY
+          echo "| State Layer | ${STATE_STATUS:-❌} | S3 Bucket |" >> $GITHUB_STEP_SUMMARY
           echo "| Network Layer | ${NETWORK_STATUS:-❌} | VPC, Subnets, IGW |" >> $GITHUB_STEP_SUMMARY
           echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: ${CLUSTER_VERSION} |" >> $GITHUB_STEP_SUMMARY
           echo "| Monitoring | ${MONITORING_STATUS:-❌} | CloudWatch Alarms |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform Version: \`${TF_VERSION}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Region: \`${AWS_REGION}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Environment: \`${TF_VAR_environment}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Project: \`${PROJECT_NAME}\`" >> $GITHUB_STEP_SUMMARY
