@@ -41,13 +41,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Attach Destroy Policy
-        run: |
-          echo "🔒 Attaching destroy policy to user..."
-          aws iam attach-user-policy \
-            --user-name vanillatstodo-deployer \
-            --policy-arn arn:aws:iam::482619384845:policy/vanillatstodo_destroy_infra
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
@@ -284,14 +277,6 @@ jobs:
             echo "ℹ️ Bucket not found or already deleted"
             echo "S3_STATUS=✅" >> $GITHUB_ENV
           fi
-
-      - name: Detach Destroy Policy
-        if: always()
-        run: |
-          echo "🔓 Detaching destroy policy..."
-          aws iam detach-user-policy \
-            --user-name vanillatstodo-deployer \
-            --policy-arn arn:aws:iam::482619384845:policy/vanillatstodo_destroy_infra
 
       - name: Summarize Cleanup Status
         if: always()
