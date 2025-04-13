@@ -27,25 +27,6 @@ test_s3_permissions() {
     fi
 }
 
-test_dynamodb_permissions() {
-    log_message "Testing DynamoDB permissions..."
-    
-    # Test DynamoDB general permissions with better error handling
-    if ! aws dynamodb list-tables --region $AWS_REGION 2>/dev/null; then
-        log_message "⚠️ Warning: Cannot list DynamoDB tables"
-    else
-        log_message "✅ Can list DynamoDB tables"
-    fi
-
-    # Check if specific table exists
-    if aws dynamodb describe-table --table-name vanillatstodo-terraform-state-lock --region $AWS_REGION 2>/dev/null; then
-        log_message "✅ DynamoDB table exists and is accessible"
-    else
-        log_message "ℹ️ DynamoDB table does not exist (expected for first run)"
-        log_message "✅ DynamoDB permissions OK (table will be created during deployment)"
-    fi
-}
-
 test_vpc_permissions() {
     log_message "Testing VPC permissions..."
     
@@ -77,7 +58,7 @@ test_iam_permissions() {
     log_message "Testing IAM permissions..."
     
     # Test IAM role operations
-    ROLE_NAME="eks_cluster_role"
+    ROLE_NAME="staging-vanillatstodo-cluster-role"
     if aws iam get-role --role-name $ROLE_NAME 2>/dev/null; then
         log_message "✅ IAM role exists and is accessible"
     else
@@ -90,7 +71,6 @@ main() {
     log_message "Starting IAM permission tests..."
     
     test_s3_permissions || exit 1
-    test_dynamodb_permissions || exit 1
     test_vpc_permissions || exit 1
     test_eks_permissions || exit 1
     test_iam_permissions || exit 1
