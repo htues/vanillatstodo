@@ -1,22 +1,4 @@
-# IAM Role for EKS
-resource "aws_iam_role" "eks_cluster" {
-  name = "${var.environment}-${var.cluster_name}-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "eks.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-# Use data source to reference existing role instead of creating new one
+# Use data source to reference existing role
 data "aws_iam_role" "eks_cluster" {
   name = "${var.environment}-${var.cluster_name}-role"
 }
