@@ -44,11 +44,6 @@ resource "aws_eks_cluster" "main" {
   }
 }
 
-# Security group configuration remains unchanged
-resource "aws_security_group" "eks_cluster" {
-  // ...existing code...
-}
-
 # Security group for EKS
 resource "aws_security_group" "eks_cluster" {
   name        = "${var.environment}-${var.cluster_name}-sg"
