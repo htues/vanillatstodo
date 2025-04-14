@@ -37,7 +37,7 @@ resource "aws_eks_cluster" "main" {
   }
 
   # Remove depends_on since we're using existing role
-  
+
   tags = {
     Name        = "${var.environment}-${var.cluster_name}"
     Environment = var.environment
