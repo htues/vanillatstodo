@@ -16,12 +16,12 @@ resource "aws_iam_role" "eks_cluster" {
   })
 }
 
-# Use data source to reference existing role
+# Use data source to reference existing role instead of creating new one
 data "aws_iam_role" "eks_cluster" {
   name = "${var.environment}-${var.cluster_name}-role"
 }
 
-# EKS Cluster
+# EKS Cluster configuration
 resource "aws_eks_cluster" "main" {
   name     = var.cluster_name
   role_arn = data.aws_iam_role.eks_cluster.arn
@@ -36,14 +36,17 @@ resource "aws_eks_cluster" "main" {
     security_group_ids      = [aws_security_group.eks_cluster.id]
   }
 
-  # Remove depends_on since we're using existing role
-
   tags = {
     Name        = "${var.environment}-${var.cluster_name}"
     Environment = var.environment
     ManagedBy   = "terraform"
     Version     = "1.31"
   }
+}
+
+# Security group configuration remains unchanged
+resource "aws_security_group" "eks_cluster" {
+  // ...existing code...
 }
 
 # Security group for EKS
