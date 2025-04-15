@@ -85,6 +85,48 @@ jobs:
             echo "EKS_STATUS=✅" >> $GITHUB_ENV
           fi
 
+      - name: Clean Up CloudWatch Resources
+        id: cloudwatch_cleanup
+        run: |
+          echo "🔍 Finding CloudWatch resources..."
+
+          # Delete CloudWatch Dashboard
+          echo "🗑️ Deleting CloudWatch Dashboard..."
+          DASHBOARD_NAME="${TF_VAR_environment}-${CLUSTER_NAME}-dashboard"
+          aws cloudwatch delete-dashboards --dashboard-names "$DASHBOARD_NAME" || true
+
+          # Delete CloudWatch Alarms
+          echo "🔍 Finding CloudWatch Alarms..."
+          ALARMS=$(aws cloudwatch describe-alarms \
+            --alarm-name-prefix "${TF_VAR_environment}-${CLUSTER_NAME}" \
+            --query 'MetricAlarms[*].AlarmName' \
+            --output text)
+
+          if [ ! -z "$ALARMS" ]; then
+            echo "🗑️ Deleting CloudWatch Alarms..."
+            for alarm in $ALARMS; do
+              aws cloudwatch delete-alarms --alarm-names "$alarm"
+              echo "Deleted alarm: $alarm"
+            done
+          fi
+
+          # Delete CloudWatch Log Groups
+          echo "🔍 Finding CloudWatch Log Groups..."
+          LOG_GROUPS=$(aws logs describe-log-groups \
+            --log-group-name-prefix "/aws/eks/${CLUSTER_NAME}" \
+            --query 'logGroups[*].logGroupName' \
+            --output text)
+
+          if [ ! -z "$LOG_GROUPS" ]; then
+            echo "🗑️ Deleting CloudWatch Log Groups..."
+            for log_group in $LOG_GROUPS; do
+              aws logs delete-log-group --log-group-name "$log_group"
+              echo "Deleted log group: $log_group"
+            done
+          fi
+
+          echo "CLOUDWATCH_STATUS=✅" >> $GITHUB_ENV
+
       - name: Clean Up Network Resources
         id: network_cleanup
         run: |
@@ -285,6 +327,7 @@ jobs:
           echo "| Resource | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "| -------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
           echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: 1.31 |" >> $GITHUB_STEP_SUMMARY
+          echo "| CloudWatch | ${CLOUDWATCH_STATUS:-❌} | Monitoring |" >> $GITHUB_STEP_SUMMARY
           echo "| VPC Resources | ${VPC_STATUS:-❌} | Network Stack |" >> $GITHUB_STEP_SUMMARY
           echo "| S3 State | ${S3_STATUS:-❌} | Terraform State |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
