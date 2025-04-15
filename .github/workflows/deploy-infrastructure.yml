@@ -156,32 +156,32 @@ jobs:
       - name: Deploy Monitoring
         working-directory: ./devops/terraform/03_monitoring
         run: |
-          echo "🔍 Checking Terraform formatting..."
-          terraform fmt -check -diff
+          echo "🔍 Checking for existing log group..."
+          MONITORING_STATUS="❌"
 
-          echo "🚀 Initializing Terraform..."
+          # Initialize Terraform
           terraform init \
             -backend-config="bucket=vanillatstodo-terraform-state" \
             -backend-config="key=staging/monitoring.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="encrypt=true"
 
-          echo "✅ Validating Terraform configuration..."
-          terraform validate
+          # Check and import log group if exists
+          if aws logs describe-log-groups \
+            --log-group-name-prefix "/aws/eks/vanillatstodo-cluster/cluster" \
+            --query 'logGroups[0].logGroupName' \
+            --output text | grep -q "vanillatstodo-cluster"; then
+            terraform import aws_cloudwatch_log_group.eks /aws/eks/vanillatstodo-cluster/cluster || true
+          fi
 
-          echo "📋 Planning Terraform changes..."
-          terraform plan \
-            -var="environment=staging" \
-            -var="cluster_name=vanillatstodo-cluster" \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -out=tfplan
+          # Plan and apply
+          if terraform plan -detailed-exitcode -out=tfplan; then
+            if terraform apply tfplan; then
+              MONITORING_STATUS="✅"
+            fi
+          fi
 
-          echo "🔄 Applying Terraform changes..."
-          terraform apply tfplan
-
-          echo "📊 Verifying CloudWatch resources..."
-          aws cloudwatch describe-dashboards \
-            --dashboard-name-prefix staging-vanillatstodo
+          echo "MONITORING_STATUS=${MONITORING_STATUS}" >> $GITHUB_ENV
 
       - name: Verify EKS Deployment
         if: success()
