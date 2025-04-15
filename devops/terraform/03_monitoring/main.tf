@@ -13,4 +13,9 @@ resource "aws_cloudwatch_log_group" "eks" {
     Environment = var.environment
     ManagedBy   = "terraform"
   }
+
+  # Prevent recreation of existing log group
+  lifecycle {
+    prevent_destroy = true
+  }
 }
