@@ -156,14 +156,32 @@ jobs:
       - name: Deploy Monitoring
         working-directory: ./devops/terraform/03_monitoring
         run: |
+          echo "🔍 Checking Terraform formatting..."
           terraform fmt -check -diff
+
+          echo "🚀 Initializing Terraform..."
           terraform init \
             -backend-config="bucket=vanillatstodo-terraform-state" \
             -backend-config="key=staging/monitoring.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}"
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+
+          echo "✅ Validating Terraform configuration..."
           terraform validate
-          terraform plan -out=tfplan
+
+          echo "📋 Planning Terraform changes..."
+          terraform plan \
+            -var="environment=staging" \
+            -var="cluster_name=vanillatstodo-cluster" \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -out=tfplan
+
+          echo "🔄 Applying Terraform changes..."
           terraform apply tfplan
+
+          echo "📊 Verifying CloudWatch resources..."
+          aws cloudwatch describe-dashboards \
+            --dashboard-name-prefix staging-vanillatstodo
 
       - name: Verify EKS Deployment
         if: success()
