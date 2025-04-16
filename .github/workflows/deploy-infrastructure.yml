@@ -263,6 +263,7 @@ jobs:
 
       - name: Export EKS Details
         id: eks_output
+        if: success()
         run: |
           ENDPOINT=$(aws eks describe-cluster \
             --name ${{ env.CLUSTER_NAME }} \
@@ -280,7 +281,7 @@ jobs:
         uses: peter-evans/repository-dispatch@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          event-type: infrastructure-ready
+          event-type: start-eks-deployment
           client-payload: |
             {
               "cluster_name": "${{ needs.deploy_infrastructure.outputs.cluster_name }}",
