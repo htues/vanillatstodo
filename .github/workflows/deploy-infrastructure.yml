@@ -23,6 +23,11 @@ jobs:
       TF_WORKSPACE: staging
       TF_VAR_environment: staging
 
+    outputs:
+      cluster_status: ${{ env.EKS_STATUS }}
+      cluster_endpoint: ${{ steps.eks_output.outputs.cluster_endpoint }}
+      cluster_name: ${{ env.CLUSTER_NAME }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -255,3 +260,30 @@ jobs:
           echo "- Project: \`${PROJECT_NAME}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Timestamp: \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`" >> $GITHUB_STEP_SUMMARY
           echo "| ----- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Export EKS Details
+        id: eks_output
+        run: |
+          ENDPOINT=$(aws eks describe-cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --query "cluster.endpoint" \
+            --output text)
+          echo "cluster_endpoint=${ENDPOINT}" >> $GITHUB_OUTPUT
+
+  trigger_app_deployment:
+    needs: deploy_infrastructure
+    if: ${{ needs.deploy_infrastructure.outputs.cluster_status == '✅' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger App Deployment
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: infrastructure-ready
+          client-payload: |
+            {
+              "cluster_name": "${{ needs.deploy_infrastructure.outputs.cluster_name }}",
+              "cluster_endpoint": "${{ needs.deploy_infrastructure.outputs.cluster_endpoint }}",
+              "environment": "staging"
+            }
