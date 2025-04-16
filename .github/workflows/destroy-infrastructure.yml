@@ -91,39 +91,34 @@ jobs:
           echo "🔍 Finding CloudWatch resources..."
 
           # Delete CloudWatch Dashboard
-          echo "🗑️ Deleting CloudWatch Dashboard..."
-          DASHBOARD_NAME="${TF_VAR_environment}-${CLUSTER_NAME}-dashboard"
-          aws cloudwatch delete-dashboards --dashboard-names "$DASHBOARD_NAME" || true
+          echo "🔍 Finding CloudWatch Dashboards..."
+          DASHBOARD_NAME="staging-vanillatstodo-cluster-dashboard"
+          aws cloudwatch delete-dashboards \
+            --dashboard-names "$DASHBOARD_NAME" || true
 
           # Delete CloudWatch Alarms
           echo "🔍 Finding CloudWatch Alarms..."
-          ALARMS=$(aws cloudwatch describe-alarms \
-            --alarm-name-prefix "${TF_VAR_environment}-${CLUSTER_NAME}" \
+          aws cloudwatch describe-alarms \
+            --alarm-name-prefix "staging-vanillatstodo-cluster" \
             --query 'MetricAlarms[*].AlarmName' \
-            --output text)
-
-          if [ ! -z "$ALARMS" ]; then
-            echo "🗑️ Deleting CloudWatch Alarms..."
-            for alarm in $ALARMS; do
+            --output text | while read -r alarm; do
+            if [ ! -z "$alarm" ]; then
+              echo "🗑️ Deleting alarm: $alarm"
               aws cloudwatch delete-alarms --alarm-names "$alarm"
-              echo "Deleted alarm: $alarm"
-            done
-          fi
+            fi
+          done
 
           # Delete CloudWatch Log Groups
           echo "🔍 Finding CloudWatch Log Groups..."
-          LOG_GROUPS=$(aws logs describe-log-groups \
-            --log-group-name-prefix "/aws/eks/${CLUSTER_NAME}" \
+          aws logs describe-log-groups \
+            --log-group-name-prefix "/aws/eks/vanillatstodo-cluster" \
             --query 'logGroups[*].logGroupName' \
-            --output text)
-
-          if [ ! -z "$LOG_GROUPS" ]; then
-            echo "🗑️ Deleting CloudWatch Log Groups..."
-            for log_group in $LOG_GROUPS; do
+            --output text | while read -r log_group; do
+            if [ ! -z "$log_group" ]; then
+              echo "🗑️ Deleting log group: $log_group"
               aws logs delete-log-group --log-group-name "$log_group"
-              echo "Deleted log group: $log_group"
-            done
-          fi
+            fi
+          done
 
           echo "CLOUDWATCH_STATUS=✅" >> $GITHUB_ENV
 
