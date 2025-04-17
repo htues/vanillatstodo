@@ -24,6 +24,7 @@ permissions:
   id-token: write
   contents: read
   deployments: write
+  repository-projects: write
 
 jobs:
   deploy:
@@ -290,6 +291,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Generate Timestamp
+        id: timestamp
+        run: echo "value=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+
       - name: Verify Cluster Details
         run: |
           if [ -z "${{ needs.deploy.outputs.cluster_endpoint }}" ]; then
@@ -311,10 +316,6 @@ jobs:
                 "triggered_by": "infrastructure-deployment",
                 "timestamp": "${{ steps.timestamp.outputs.value }}"
             }
-
-      - name: Generate Timestamp
-        id: timestamp
-        run: echo "value=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
 
       - name: Verify Trigger
         if: always()
