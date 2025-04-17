@@ -1,0 +1,70 @@
+name: Deploy infrastructure and codebase
+
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  id-token: write
+  contents: read
+  deployments: write
+  repository-projects: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Load Environment Variables
+        run: |
+          cat .github/variables/environment.env >> $GITHUB_ENV
+
+  deploy_infrastructure:
+    needs: setup
+    uses: ./.github/workflows/iac.yml
+    with:
+      environment: ${{ inputs.environment || 'staging' }}
+    secrets: inherit
+
+  deploy_codebase:
+    needs: deploy_infrastructure
+    if: needs.deploy_infrastructure.outputs.cluster_status == '✅'
+    uses: ./.github/workflows/trigger_codebase.yml
+    with:
+      cluster_name: ${{ needs.deploy_infrastructure.outputs.cluster_name }}
+      cluster_endpoint: ${{ needs.deploy_infrastructure.outputs.cluster_endpoint }}
+      environment: ${{ inputs.environment || 'staging' }}
+    secrets: inherit
+
+  deployment_summary:
+    needs: [deploy_infrastructure, deploy_codebase]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "### Deployment Summary 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "| --------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Infrastructure | ${{ needs.deploy_infrastructure.result }} | EKS Cluster |" >> $GITHUB_STEP_SUMMARY
+          echo "| Codebase | ${{ needs.deploy_codebase.result }} | Codebase Deployment |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment**: ${{ inputs.environment || 'staging' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
