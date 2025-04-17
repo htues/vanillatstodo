@@ -16,6 +16,10 @@ env:
   CLUSTER_VERSION: "1.31"
   TF_VAR_kubernetes_version: "1.31"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -212,6 +216,7 @@ jobs:
           echo "- Region: ${{ env.AWS_REGION }}"
 
       - name: Set Deployment Status
+        id: deployment_status
         if: always()
         run: |
           check_resource() {
@@ -241,6 +246,8 @@ jobs:
 
           # Monitoring Check
           check_resource "aws cloudwatch describe-alarms --alarm-names ${{ env.PROJECT_NAME }}-cluster-health" "MONITORING_STATUS" || true
+
+          echo "eks_status=${EKS_STATUS}" >> $GITHUB_OUTPUT
 
       - name: Summarize Deployment Status
         if: always()
@@ -273,10 +280,18 @@ jobs:
 
   trigger_app_deployment:
     needs: deploy_infrastructure
-    if: ${{ needs.deploy_infrastructure.outputs.cluster_status == '✅' }}
+    if: always() && needs.deploy_infrastructure.outputs.cluster_status == '✅' }}
     runs-on: ubuntu-latest
 
     steps:
+      - name: Verify Cluster Details
+        run: |
+          if [ -z "${{ needs.deploy.outputs.cluster_endpoint }}" ]; then
+            echo "❌ Missing cluster endpoint"
+            exit 1
+          fi
+          echo "✅ Cluster details verified"
+
       - name: Trigger App Deployment
         uses: peter-evans/repository-dispatch@v2
         with:
@@ -284,7 +299,19 @@ jobs:
           event-type: start-eks-deployment
           client-payload: |
             {
-              "cluster_name": "${{ needs.deploy_infrastructure.outputs.cluster_name }}",
-              "cluster_endpoint": "${{ needs.deploy_infrastructure.outputs.cluster_endpoint }}",
-              "environment": "staging"
+              "cluster_name": "${{ needs.deploy.outputs.cluster_name }}",
+              "cluster_endpoint": "${{ needs.deploy.outputs.cluster_endpoint }}",
+              "environment": "staging",
+              "triggered_by": "infrastructure-deployment",
+              "timestamp": "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
             }
+
+      - name: Verify Trigger
+        if: always()
+        run: |
+          echo "### App Deployment Trigger Status 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| ------ | ----- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster | ${{ needs.deploy.outputs.cluster_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Endpoint | ${{ needs.deploy.outputs.cluster_endpoint }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
