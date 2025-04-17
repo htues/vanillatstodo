@@ -20,9 +20,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  id-token: write
+  contents: read
+  deployments: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: staging
     env:
       TF_WORKSPACE: staging
       TF_VAR_environment: staging
@@ -279,8 +285,8 @@ jobs:
           echo "cluster_endpoint=${ENDPOINT}" >> $GITHUB_OUTPUT
 
   trigger_app_deployment:
-    needs: deploy_infrastructure
-    if: always() && needs.deploy_infrastructure.outputs.cluster_status == '✅' }}
+    needs: deploy
+    if: always() && needs.deploy.outputs.cluster_status == '✅'
     runs-on: ubuntu-latest
 
     steps:
@@ -299,12 +305,16 @@ jobs:
           event-type: start-eks-deployment
           client-payload: |
             {
-              "cluster_name": "${{ needs.deploy.outputs.cluster_name }}",
-              "cluster_endpoint": "${{ needs.deploy.outputs.cluster_endpoint }}",
-              "environment": "staging",
-              "triggered_by": "infrastructure-deployment",
-              "timestamp": "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+                "cluster_name": "${{ needs.deploy.outputs.cluster_name }}",
+                "cluster_endpoint": "${{ needs.deploy.outputs.cluster_endpoint }}",
+                "environment": "staging",
+                "triggered_by": "infrastructure-deployment",
+                "timestamp": "${{ steps.timestamp.outputs.value }}"
             }
+
+      - name: Generate Timestamp
+        id: timestamp
+        run: echo "value=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
 
       - name: Verify Trigger
         if: always()
