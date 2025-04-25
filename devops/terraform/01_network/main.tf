@@ -6,6 +6,8 @@ resource "aws_vpc" "main" {
 
   tags = {
     Name = "${var.environment}-vanillatstodo-vpc"
+    Name = "${var.environment}-vanillatstodo-vpc"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 }
 
@@ -40,7 +42,7 @@ resource "aws_subnet" "public_b" {
   }
 }
 
-// Private Subnets
+# Create Private Subnets
 resource "aws_subnet" "private_a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.3.0/24"
@@ -67,7 +69,7 @@ resource "aws_subnet" "private_b" {
   }
 }
 
-// NAT Gateways
+# Create NAT Gateways
 resource "aws_eip" "nat_a" {
   domain = "vpc"
   tags = {
@@ -84,6 +86,7 @@ resource "aws_nat_gateway" "nat_a" {
     Name        = "${var.environment}-nat-a"
     Environment = var.environment
   }
+  depends_on = [aws_internet_gateway.main]    
 }
 
 resource "aws_eip" "nat_b" {
@@ -102,6 +105,7 @@ resource "aws_nat_gateway" "nat_b" {
     Name        = "${var.environment}-nat-b"
     Environment = var.environment
   }
+  depends_on = [aws_internet_gateway.main]  
 }
 
 # Create Internet Gateway
@@ -113,7 +117,7 @@ resource "aws_internet_gateway" "main" {
   }
 }
 
-# Route table associations
+# Create Route table associations
 resource "aws_route_table_association" "public_a" {
   subnet_id      = aws_subnet.public_a.id
   route_table_id = aws_route_table.public.id
@@ -134,9 +138,12 @@ resource "aws_route_table_association" "private_b" {
   route_table_id = aws_route_table.private_b.id
 }
 
-# Optional: Add VPC Flow Logs
+# Get current AWS account ID
+data "aws_caller_identity" "current" {}
+
+# Optional: VPC Flow Logs
 resource "aws_flow_log" "main" {
-  iam_role_arn    = aws_iam_role.vpc_flow_log_role.arn
+  iam_role_arn    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.environment}-vanillatstodo-vpc-flow-log-role"
   log_destination = aws_cloudwatch_log_group.vpc_flow_log.arn
   traffic_type    = "ALL"
   vpc_id          = aws_vpc.main.id
@@ -157,24 +164,118 @@ resource "aws_cloudwatch_log_group" "vpc_flow_log" {
   }
 }
 
-resource "aws_iam_role" "vpc_flow_log_role" {
-  name = "${var.environment}-vpc-flow-log-role"
+# VPC Endpoints for EKS private access
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.${var.aws_region}.s3"
+  vpc_endpoint_type = "Gateway"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "vpc-flow-logs.amazonaws.com"
-        }
-      }
-    ]
-  })
+  route_table_ids = [
+    aws_route_table.private_a.id,
+    aws_route_table.private_b.id
+  ]
 
   tags = {
-    Name        = "${var.environment}-vpc-flow-log-role"
+    Name        = "${var.environment}-s3-endpoint"
+    Environment = var.environment
+  }
+}
+
+resource "aws_vpc_endpoint" "ecr_api" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${var.aws_region}.ecr.api"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = {
+    Name        = "${var.environment}-ecr-api-endpoint"
+    Environment = var.environment
+  }
+  depends_on = [aws_route_table.private_a, aws_route_table.private_b]  
+}
+
+# Add ECR DKR endpoint
+resource "aws_vpc_endpoint" "ecr_dkr" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${var.aws_region}.ecr.dkr"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = {
+    Name        = "${var.environment}-ecr-dkr-endpoint"
+    Environment = var.environment
+  }
+  depends_on = [aws_route_table.private_a, aws_route_table.private_b]  
+}
+
+resource "aws_security_group" "vpc_endpoints" {
+  name_prefix = "${var.environment}-vpc-endpoints-"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.environment}-vpc-endpoints-sg"
+    Environment = var.environment
+  }
+}
+
+# Create public route table
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = {
+    Name        = "${var.environment}-public"
+    Environment = var.environment
+  }
+}
+
+# Create private route tables for NAT gateways
+resource "aws_route_table" "private_a" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.nat_a.id
+  }
+
+  tags = {
+    Name        = "${var.environment}-private-a"
+    Environment = var.environment
+  }
+}
+
+resource "aws_route_table" "private_b" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.nat_b.id
+  }
+
+  tags = {
+    Name        = "${var.environment}-private-b"
     Environment = var.environment
   }
 }
