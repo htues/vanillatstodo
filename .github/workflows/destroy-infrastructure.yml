@@ -125,43 +125,67 @@ jobs:
       - name: Clean Up Network Resources
         id: network_cleanup
         run: |
-          # First disassociate EIPs from NAT Gateways
           echo "🔍 Finding NAT Gateways and EIPs..."
           VPC_ID=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Name,Values=*vanillatstodo*" \
             --query 'Vpcs[0].VpcId' \
             --output text)
 
-          if [ "$VPC_ID" != "None" ]; then
+          echo "DEBUG: Found VPC_ID: $VPC_ID"
+
+          if [ "$VPC_ID" != "None" ] && [ ! -z "$VPC_ID" ]; then
+            echo "DEBUG: Processing VPC: $VPC_ID"
+            
             # Get NAT Gateways and their associated EIPs
             NAT_GATEWAYS=$(aws ec2 describe-nat-gateways \
               --filter "Name=vpc-id,Values=$VPC_ID" \
               --query 'NatGateways[*].[NatGatewayId,NatGatewayAddresses[0].AllocationId]' \
               --output text)
             
-            while IFS=$'\t' read -r nat_id eip_id; do
-              if [ ! -z "$nat_id" ]; then
-                echo "🗑️ Deleting NAT Gateway: $nat_id"
-                aws ec2 delete-nat-gateway --nat-gateway-id $nat_id
-                
-                # Wait for NAT Gateway deletion
-                echo "⏳ Waiting for NAT Gateway deletion..."
-                aws ec2 wait nat-gateway-deleted --nat-gateway-ids $nat_id
-                
+            echo "DEBUG: Found NAT Gateways: $NAT_GATEWAYS"
+            
+            if [ -z "$NAT_GATEWAYS" ]; then
+              echo "ℹ️ No NAT Gateways found in VPC"
+            else
+              while IFS=$'\t' read -r nat_id eip_id; do
+                if [ ! -z "$nat_id" ]; then
+                  echo "🗑️ Deleting NAT Gateway: $nat_id"
+                  aws ec2 delete-nat-gateway --nat-gateway-id $nat_id
+                  
+                  echo "⏳ Waiting for NAT Gateway deletion..."
+                  aws ec2 wait nat-gateway-deleted --nat-gateway-ids $nat_id
+                  
+                  if [ ! -z "$eip_id" ]; then
+                    echo "🗑️ Now releasing EIP: $eip_id"
+                    aws ec2 release-address --allocation-id $eip_id || true
+                  fi
+                fi
+              done <<< "$NAT_GATEWAYS"
+            fi
+            
+            # Check for orphaned EIPs with detailed output
+            echo "🔍 Checking for orphaned EIPs..."
+            ORPHANED_EIPS=$(aws ec2 describe-addresses \
+              --filters "Name=tag:Name,Values=*nat-*" \
+              --query 'Addresses[?AssociationId==null].[AllocationId,PublicIp]' \
+              --output text)
+            
+            if [ -z "$ORPHANED_EIPS" ]; then
+              echo "ℹ️ No orphaned EIPs found"
+            else
+              echo "Found orphaned EIPs: $ORPHANED_EIPS"
+              while IFS=$'\t' read -r eip_id public_ip; do
                 if [ ! -z "$eip_id" ]; then
-                  echo "🗑️ Now releasing EIP: $eip_id"
+                  echo "🗑️ Releasing orphaned EIP: $eip_id ($public_ip)"
                   aws ec2 release-address --allocation-id $eip_id || true
                 fi
-              fi
-            done <<< "$NAT_GATEWAYS"
-            
-            # Additional cleanup for any orphaned EIPs
-            echo "🔍 Checking for orphaned EIPs..."
-            aws ec2 describe-addresses \
-              --filters "Name=tag:Name,Values=*nat-*" \
-              --query 'Addresses[?AssociationId==null].AllocationId' \
-              --output text | xargs -r -n1 aws ec2 release-address --allocation-id
+              done <<< "$ORPHANED_EIPS"
+            fi
+          else
+            echo "ℹ️ No VPC found matching the filter"
           fi
+
+          echo "NETWORK_STATUS=✅" >> $GITHUB_ENV
 
       - name: Clean Up S3 Resources
         id: s3_cleanup
@@ -233,7 +257,7 @@ jobs:
           echo "| -------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
           echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: 1.31 |" >> $GITHUB_STEP_SUMMARY
           echo "| CloudWatch | ${CLOUDWATCH_STATUS:-❌} | Monitoring |" >> $GITHUB_STEP_SUMMARY
-          echo "| VPC Resources | ${VPC_STATUS:-❌} | Network Stack |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network Resources | ${VPC_STATUS:-❌} | Network Stack |" >> $GITHUB_STEP_SUMMARY
           echo "| S3 State | ${S3_STATUS:-❌} | Terraform State |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
