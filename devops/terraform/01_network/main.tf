@@ -271,9 +271,18 @@ resource "aws_flow_log" "main" {
 resource "aws_cloudwatch_log_group" "vpc_flow_log" {
   name              = "/aws/vpc/${var.environment}-flow-logs"
   retention_in_days = 30
+  skip_destroy      = true
 
   tags = {
     Name        = "${var.environment}-vpc-flow-log-group"
     Environment = var.environment
+  }
+
+  lifecycle {
+    prevent_destroy = true # Add this block
+    ignore_changes = [
+      # Ignore changes to tags
+      tags
+    ]
   }
 }
