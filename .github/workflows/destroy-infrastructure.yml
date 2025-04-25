@@ -125,21 +125,29 @@ jobs:
       - name: Clean Up Network Resources
         id: network_cleanup
         run: |
-          # Find and delete VPC Endpoints first
           echo "🔍 Finding VPC Endpoints..."
-          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=*vanillatstodo*" --query 'Vpcs[0].VpcId' --output text)
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Name,Values=*vanillatstodo*" \
+            --query 'Vpcs[0].VpcId' \
+            --output text)
 
           if [ "$VPC_ID" != "None" ]; then
-            # Delete VPC Endpoints
+            # Delete VPC Endpoints first
             ENDPOINT_IDS=$(aws ec2 describe-vpc-endpoints \
               --filters "Name=vpc-id,Values=$VPC_ID" \
               --query 'VpcEndpoints[*].VpcEndpointId' \
               --output text)
             
             for endpoint in $ENDPOINT_IDS; do
-              echo "🗑️ Deleting VPC Endpoint: $endpoint"
-              aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $endpoint
+              if [ ! -z "$endpoint" ]; then
+                echo "🗑️ Deleting VPC Endpoint: $endpoint"
+                aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $endpoint
+              fi
             done
+            
+            # Wait for endpoints to be deleted
+            echo "⏳ Waiting for endpoints to be deleted..."
+            sleep 10
             
             # Delete NAT Gateways
             echo "🔍 Finding NAT Gateways..."
@@ -180,6 +188,7 @@ jobs:
               echo "🗑️ Deleting Flow Log: $flow_log"
               aws ec2 delete-flow-logs --flow-log-ids $flow_log
             done
+          fi
 
       - name: Clean Up S3 Resources
         id: s3_cleanup
