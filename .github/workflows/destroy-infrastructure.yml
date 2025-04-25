@@ -125,133 +125,61 @@ jobs:
       - name: Clean Up Network Resources
         id: network_cleanup
         run: |
-          echo "🔍 Finding DHCP Options Sets..."
-          DHCP_IDS=$(aws ec2 describe-dhcp-options \
-            --filters "Name=owner-id,Values=$(aws sts get-caller-identity --query 'Account' --output text)" \
-            --query 'DhcpOptions[*].DhcpOptionsId' --output text)
-
-          for DHCP_ID in $DHCP_IDS; do
-            echo "Checking DHCP Options Set: $DHCP_ID"
-            
-            # Check if it's associated with any VPCs
-            VPC_ASSOCIATIONS=$(aws ec2 describe-vpcs \
-              --filters "Name=dhcp-options-id,Values=$DHCP_ID" \
-              --query 'Vpcs[*].VpcId' --output text)
-            
-            if [ -n "$VPC_ASSOCIATIONS" ]; then
-              echo "⚠️ DHCP Options Set is associated with VPCs: $VPC_ASSOCIATIONS"
-              for vpc in $VPC_ASSOCIATIONS; do
-                echo "🔄 Associating VPC with default DHCP options..."
-                aws ec2 associate-dhcp-options --vpc-id $vpc --dhcp-options-id default
-              done
-            fi
-            
-            # Try to delete non-default DHCP options sets
-            if aws ec2 describe-dhcp-options \
-              --dhcp-options-ids $DHCP_ID \
-              --query 'DhcpOptions[0].Tags[?Key==`Name`].Value' \
-              --output text | grep -q "vanillatstodo"; then
-              echo "🗑️ Deleting custom DHCP Options Set..."
-              aws ec2 delete-dhcp-options --dhcp-options-id $DHCP_ID || true
-            fi
-          done
-
-          echo "🔍 Finding VPC resources..."
+          # Find and delete VPC Endpoints first
+          echo "🔍 Finding VPC Endpoints..."
           VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=*vanillatstodo*" --query 'Vpcs[0].VpcId' --output text)
 
           if [ "$VPC_ID" != "None" ]; then
-            echo "Found VPC: $VPC_ID"
-            
-            # Add Internet Gateway cleanup first
-            echo "🔍 Finding Internet Gateway..."
-            IGW_ID=$(aws ec2 describe-internet-gateways \
-              --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
-              --query 'InternetGateways[0].InternetGatewayId' \
+            # Delete VPC Endpoints
+            ENDPOINT_IDS=$(aws ec2 describe-vpc-endpoints \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'VpcEndpoints[*].VpcEndpointId' \
               --output text)
-
-            if [ "$IGW_ID" != "None" ]; then
-              echo "🗑️ Detaching Internet Gateway: $IGW_ID"
-              aws ec2 detach-internet-gateway \
-                --internet-gateway-id $IGW_ID \
-                --vpc-id $VPC_ID
-
-              echo "🗑️ Deleting Internet Gateway..."
-              aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID
-            fi            
-
-            # List all dependencies for debugging
-            echo "📋 Listing VPC Dependencies..."
-            aws ec2 describe-vpc-attribute --vpc-id $VPC_ID --attribute enableDnsSupport
-            aws ec2 describe-vpc-peering-connections --filters "Name=requester-vpc-info.vpc-id,Values=$VPC_ID"
-            aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID"
-
-            # Force detach and delete ENIs
-            echo "🔍 Finding Network Interfaces..."
-            ENI_IDS=$(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text)
-            for eni in $ENI_IDS; do
-              echo "Processing ENI: $eni"
-              ATTACHMENT_ID=$(aws ec2 describe-network-interfaces --network-interface-ids $eni --query 'NetworkInterfaces[0].Attachment.AttachmentId' --output text)
-              if [ "$ATTACHMENT_ID" != "None" ]; then
-                echo "🔄 Force detaching ENI: $eni"
-                aws ec2 detach-network-interface --attachment-id $ATTACHMENT_ID --force
-                sleep 15  # Wait for detachment
-              fi
-              echo "🗑️ Deleting ENI: $eni"
-              aws ec2 delete-network-interface --network-interface-id $eni || true
+            
+            for endpoint in $ENDPOINT_IDS; do
+              echo "🗑️ Deleting VPC Endpoint: $endpoint"
+              aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $endpoint
             done
-
-            # Delete Security Group Rules First
-            echo "🔍 Finding Security Groups..."
-            SG_IDS=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text)
-            for sg in $SG_IDS; do
-              echo "🗑️ Removing inbound rules from SG: $sg"
-              aws ec2 revoke-security-group-ingress --group-id $sg --protocol all --source-group $sg --port -1 || true
-              echo "🗑️ Removing outbound rules from SG: $sg"
-              aws ec2 revoke-security-group-egress --group-id $sg --protocol all --port -1 --cidr 0.0.0.0/0 || true
-              echo "🗑️ Deleting Security Group: $sg"
-              aws ec2 delete-security-group --group-id $sg || true
+            
+            # Delete NAT Gateways
+            echo "🔍 Finding NAT Gateways..."
+            NAT_IDS=$(aws ec2 describe-nat-gateways \
+              --filter "Name=vpc-id,Values=$VPC_ID" \
+              --query 'NatGateways[*].NatGatewayId' \
+              --output text)
+            
+            for nat in $NAT_IDS; do
+              echo "🗑️ Deleting NAT Gateway: $nat"
+              aws ec2 delete-nat-gateway --nat-gateway-id $nat
             done
-
-            # Delete Route Tables (except main)
-            echo "🔍 Finding Route Tables..."
-            RT_IDS=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text)
-            for rt in $RT_IDS; do
-              # Delete routes first
-              echo "🗑️ Deleting routes from RT: $rt"
-              ROUTES=$(aws ec2 describe-route-tables --route-table-id $rt --query 'RouteTables[0].Routes[?GatewayId!=`local`].DestinationCidrBlock' --output text)
-              for route in $ROUTES; do
-                aws ec2 delete-route --route-table-id $rt --destination-cidr-block $route || true
-              done
-              
-              # Then disassociate
-              ASSOC_IDS=$(aws ec2 describe-route-tables --route-table-id $rt --query 'RouteTables[0].Associations[*].RouteTableAssociationId' --output text)
-              for assoc in $ASSOC_IDS; do
-                echo "🔄 Disassociating route table: $assoc"
-                aws ec2 disassociate-route-table --association-id $assoc || true
-              done
-              
-              echo "🗑️ Deleting Route Table: $rt"
-              aws ec2 delete-route-table --route-table-id $rt || true
+            
+            # Wait for NAT Gateways to be deleted
+            echo "⏳ Waiting for NAT Gateways to be deleted..."
+            sleep 30
+            
+            # Release Elastic IPs
+            echo "🔍 Finding Elastic IPs..."
+            EIP_ALLOCS=$(aws ec2 describe-addresses \
+              --filters "Name=tag:Name,Values=*nat-*" \
+              --query 'Addresses[*].AllocationId' \
+              --output text)
+            
+            for eip in $EIP_ALLOCS; do
+              echo "🗑️ Releasing Elastic IP: $eip"
+              aws ec2 release-address --allocation-id $eip
             done
-
-            # Delete Subnets
-            echo "🔍 Finding Subnets..."
-            SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[*].SubnetId' --output text)
-            for subnet in $SUBNET_IDS; do
-              echo "🗑️ Deleting subnet: $subnet"
-              aws ec2 delete-subnet --subnet-id $subnet || true
+            
+            # Delete Flow Logs
+            echo "🔍 Finding VPC Flow Logs..."
+            FLOW_LOG_IDS=$(aws ec2 describe-flow-logs \
+              --filter "Name=resource-id,Values=$VPC_ID" \
+              --query 'FlowLogs[*].FlowLogId' \
+              --output text)
+            
+            for flow_log in $FLOW_LOG_IDS; do
+              echo "🗑️ Deleting Flow Log: $flow_log"
+              aws ec2 delete-flow-logs --flow-log-ids $flow_log
             done
-
-            # Final VPC deletion attempt
-            echo "🗑️ Attempting VPC deletion..."
-            sleep 30  # Wait for all deletions to complete
-            aws ec2 delete-vpc --vpc-id $VPC_ID
-          fi
-          if [ $? -eq 0 ]; then
-            echo "VPC_STATUS=✅" >> $GITHUB_ENV
-          else
-            echo "VPC_STATUS=❌" >> $GITHUB_ENV
-          fi
 
       - name: Clean Up S3 Resources
         id: s3_cleanup
