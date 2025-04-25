@@ -5,8 +5,7 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
 
   tags = {
-    Name = "${var.environment}-vanillatstodo-vpc"
-    Name = "${var.environment}-vanillatstodo-vpc"
+    Name = "${var.environment}-vanillatstodo-vpc"  // Remove this duplicate
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 }
@@ -18,27 +17,6 @@ resource "aws_internet_gateway" "main" {
   tags = {
     Name = "${var.environment}-vanillatstodo-igw"
   }
-}
-
-# Create Route table associations
-resource "aws_route_table_association" "public_a" {
-  subnet_id      = aws_subnet.public_a.id
-  route_table_id = aws_route_table.public.id
-}
-
-resource "aws_route_table_association" "public_b" {
-  subnet_id      = aws_subnet.public_b.id
-  route_table_id = aws_route_table.public.id
-}
-
-resource "aws_route_table_association" "private_a" {
-  subnet_id      = aws_subnet.private_a.id
-  route_table_id = aws_route_table.private_a.id
-}
-
-resource "aws_route_table_association" "private_b" {
-  subnet_id      = aws_subnet.private_b.id
-  route_table_id = aws_route_table.private_b.id
 }
 
 # Create public subnets
@@ -127,6 +105,7 @@ resource "aws_route_table" "private_a" {
     Name        = "${var.environment}-private-a"
     Environment = var.environment
   }
+  depends_on = [aws_nat_gateway.nat_a]  
 }
 
 resource "aws_route_table" "private_b" {
@@ -141,6 +120,28 @@ resource "aws_route_table" "private_b" {
     Name        = "${var.environment}-private-b"
     Environment = var.environment
   }
+  depends_on = [aws_nat_gateway.nat_b]  
+}
+
+# Create Route table associations
+resource "aws_route_table_association" "public_a" {
+  subnet_id      = aws_subnet.public_a.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "public_b" {
+  subnet_id      = aws_subnet.public_b.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "private_a" {
+  subnet_id      = aws_subnet.private_a.id
+  route_table_id = aws_route_table.private_a.id
+}
+
+resource "aws_route_table_association" "private_b" {
+  subnet_id      = aws_subnet.private_b.id
+  route_table_id = aws_route_table.private_b.id
 }
 
 # Create NAT Gateways
@@ -180,6 +181,30 @@ resource "aws_nat_gateway" "nat_b" {
     Environment = var.environment
   }
   depends_on = [aws_internet_gateway.main]  
+}
+
+resource "aws_security_group" "vpc_endpoints" {
+  name_prefix = "${var.environment}-vpc-endpoints-"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.environment}-vpc-endpoints-sg"
+    Environment = var.environment
+  }
 }
 
 # VPC Endpoints for EKS private access
@@ -228,30 +253,6 @@ resource "aws_vpc_endpoint" "ecr_dkr" {
     Environment = var.environment
   }
   depends_on = [aws_route_table.private_a, aws_route_table.private_b]  
-}
-
-resource "aws_security_group" "vpc_endpoints" {
-  name_prefix = "${var.environment}-vpc-endpoints-"
-  vpc_id      = aws_vpc.main.id
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = [aws_vpc.main.cidr_block]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name        = "${var.environment}-vpc-endpoints-sg"
-    Environment = var.environment
-  }
 }
 
 # Get current AWS account ID
