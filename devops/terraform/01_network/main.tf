@@ -11,6 +11,36 @@ resource "aws_vpc" "main" {
   }
 }
 
+# Create Internet Gateway
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "${var.environment}-vanillatstodo-igw"
+  }
+}
+
+# Create Route table associations
+resource "aws_route_table_association" "public_a" {
+  subnet_id      = aws_subnet.public_a.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "public_b" {
+  subnet_id      = aws_subnet.public_b.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "private_a" {
+  subnet_id      = aws_subnet.private_a.id
+  route_table_id = aws_route_table.private_a.id
+}
+
+resource "aws_route_table_association" "private_b" {
+  subnet_id      = aws_subnet.private_b.id
+  route_table_id = aws_route_table.private_b.id
+}
+
 # Create public subnets
 resource "aws_subnet" "public_a" {
   vpc_id            = aws_vpc.main.id
@@ -69,6 +99,50 @@ resource "aws_subnet" "private_b" {
   }
 }
 
+# Create public route table
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = {
+    Name        = "${var.environment}-public"
+    Environment = var.environment
+  }
+}
+
+# Create private route tables for NAT gateways
+resource "aws_route_table" "private_a" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.nat_a.id
+  }
+
+  tags = {
+    Name        = "${var.environment}-private-a"
+    Environment = var.environment
+  }
+}
+
+resource "aws_route_table" "private_b" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.nat_b.id
+  }
+
+  tags = {
+    Name        = "${var.environment}-private-b"
+    Environment = var.environment
+  }
+}
+
 # Create NAT Gateways
 resource "aws_eip" "nat_a" {
   domain = "vpc"
@@ -106,62 +180,6 @@ resource "aws_nat_gateway" "nat_b" {
     Environment = var.environment
   }
   depends_on = [aws_internet_gateway.main]  
-}
-
-# Create Internet Gateway
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name = "${var.environment}-vanillatstodo-igw"
-  }
-}
-
-# Create Route table associations
-resource "aws_route_table_association" "public_a" {
-  subnet_id      = aws_subnet.public_a.id
-  route_table_id = aws_route_table.public.id
-}
-
-resource "aws_route_table_association" "public_b" {
-  subnet_id      = aws_subnet.public_b.id
-  route_table_id = aws_route_table.public.id
-}
-
-resource "aws_route_table_association" "private_a" {
-  subnet_id      = aws_subnet.private_a.id
-  route_table_id = aws_route_table.private_a.id
-}
-
-resource "aws_route_table_association" "private_b" {
-  subnet_id      = aws_subnet.private_b.id
-  route_table_id = aws_route_table.private_b.id
-}
-
-# Get current AWS account ID
-data "aws_caller_identity" "current" {}
-
-# Optional: VPC Flow Logs
-resource "aws_flow_log" "main" {
-  iam_role_arn    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.environment}-vanillatstodo-vpc-flow-log-role"
-  log_destination = aws_cloudwatch_log_group.vpc_flow_log.arn
-  traffic_type    = "ALL"
-  vpc_id          = aws_vpc.main.id
-
-  tags = {
-    Name        = "${var.environment}-vpc-flow-log"
-    Environment = var.environment
-  }
-}
-
-resource "aws_cloudwatch_log_group" "vpc_flow_log" {
-  name              = "/aws/vpc/${var.environment}-flow-logs"
-  retention_in_days = 30
-
-  tags = {
-    Name        = "${var.environment}-vpc-flow-log-group"
-    Environment = var.environment
-  }
 }
 
 # VPC Endpoints for EKS private access
@@ -236,46 +254,28 @@ resource "aws_security_group" "vpc_endpoints" {
   }
 }
 
-# Create public route table
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
+# Get current AWS account ID
+data "aws_caller_identity" "current" {}
 
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main.id
-  }
+# Optional: VPC Flow Logs
+resource "aws_flow_log" "main" {
+  iam_role_arn    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.environment}-vanillatstodo-vpc-flow-log-role"
+  log_destination = aws_cloudwatch_log_group.vpc_flow_log.arn
+  traffic_type    = "ALL"
+  vpc_id          = aws_vpc.main.id
 
   tags = {
-    Name        = "${var.environment}-public"
+    Name        = "${var.environment}-vpc-flow-log"
     Environment = var.environment
   }
 }
 
-# Create private route tables for NAT gateways
-resource "aws_route_table" "private_a" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.nat_a.id
-  }
+resource "aws_cloudwatch_log_group" "vpc_flow_log" {
+  name              = "/aws/vpc/${var.environment}-flow-logs"
+  retention_in_days = 30
 
   tags = {
-    Name        = "${var.environment}-private-a"
-    Environment = var.environment
-  }
-}
-
-resource "aws_route_table" "private_b" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.nat_b.id
-  }
-
-  tags = {
-    Name        = "${var.environment}-private-b"
+    Name        = "${var.environment}-vpc-flow-log-group"
     Environment = var.environment
   }
 }
