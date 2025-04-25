@@ -268,21 +268,26 @@ resource "aws_flow_log" "main" {
   }
 }
 
+# Check and delete existing log group if needed
+resource "null_resource" "delete_existing_log_group" {
+  provisioner "local-exec" {
+    command = <<-EOF
+      if aws logs describe-log-groups --log-group-name-prefix "/aws/vpc/${var.environment}-flow-logs" --query 'logGroups[*]' --output text | grep -q "/aws/vpc/${var.environment}-flow-logs"; then
+        echo "🗑️ Deleting existing VPC Flow Logs group"
+        aws logs delete-log-group --log-group-name "/aws/vpc/${var.environment}-flow-logs"
+        sleep 5
+      fi
+    EOF
+  }
+}
+
 resource "aws_cloudwatch_log_group" "vpc_flow_log" {
   name              = "/aws/vpc/${var.environment}-flow-logs"
   retention_in_days = 30
-  skip_destroy      = true
 
   tags = {
     Name        = "${var.environment}-vpc-flow-log-group"
     Environment = var.environment
   }
-
-  lifecycle {
-    prevent_destroy = true # Add this block
-    ignore_changes = [
-      # Ignore changes to tags
-      tags
-    ]
-  }
+  depends_on = [null_resource.delete_existing_log_group]
 }
