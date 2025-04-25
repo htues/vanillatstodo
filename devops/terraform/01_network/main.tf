@@ -279,10 +279,10 @@ resource "aws_cloudwatch_log_group" "vpc_flow_log" {
   }
 
   lifecycle {
-    prevent_destroy = true   # Add this block
+    prevent_destroy = true # Add this block
     ignore_changes = [
       # Ignore changes to tags
       tags
     ]
-  }  
+  }
 }
