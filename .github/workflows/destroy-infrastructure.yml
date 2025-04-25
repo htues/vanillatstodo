@@ -125,69 +125,42 @@ jobs:
       - name: Clean Up Network Resources
         id: network_cleanup
         run: |
-          echo "🔍 Finding VPC Endpoints..."
+          # First disassociate EIPs from NAT Gateways
+          echo "🔍 Finding NAT Gateways and EIPs..."
           VPC_ID=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Name,Values=*vanillatstodo*" \
             --query 'Vpcs[0].VpcId' \
             --output text)
 
           if [ "$VPC_ID" != "None" ]; then
-            # Delete VPC Endpoints first
-            ENDPOINT_IDS=$(aws ec2 describe-vpc-endpoints \
-              --filters "Name=vpc-id,Values=$VPC_ID" \
-              --query 'VpcEndpoints[*].VpcEndpointId' \
-              --output text)
-            
-            for endpoint in $ENDPOINT_IDS; do
-              if [ ! -z "$endpoint" ]; then
-                echo "🗑️ Deleting VPC Endpoint: $endpoint"
-                aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $endpoint
-              fi
-            done
-            
-            # Wait for endpoints to be deleted
-            echo "⏳ Waiting for endpoints to be deleted..."
-            sleep 10
-            
-            # Delete NAT Gateways
-            echo "🔍 Finding NAT Gateways..."
-            NAT_IDS=$(aws ec2 describe-nat-gateways \
+            # Get NAT Gateways and their associated EIPs
+            NAT_GATEWAYS=$(aws ec2 describe-nat-gateways \
               --filter "Name=vpc-id,Values=$VPC_ID" \
-              --query 'NatGateways[*].NatGatewayId' \
+              --query 'NatGateways[*].[NatGatewayId,NatGatewayAddresses[0].AllocationId]' \
               --output text)
             
-            for nat in $NAT_IDS; do
-              echo "🗑️ Deleting NAT Gateway: $nat"
-              aws ec2 delete-nat-gateway --nat-gateway-id $nat
-            done
+            while IFS=$'\t' read -r nat_id eip_id; do
+              if [ ! -z "$nat_id" ]; then
+                echo "🗑️ Deleting NAT Gateway: $nat_id"
+                aws ec2 delete-nat-gateway --nat-gateway-id $nat_id
+                
+                # Wait for NAT Gateway deletion
+                echo "⏳ Waiting for NAT Gateway deletion..."
+                aws ec2 wait nat-gateway-deleted --nat-gateway-ids $nat_id
+                
+                if [ ! -z "$eip_id" ]; then
+                  echo "🗑️ Now releasing EIP: $eip_id"
+                  aws ec2 release-address --allocation-id $eip_id || true
+                fi
+              fi
+            done <<< "$NAT_GATEWAYS"
             
-            # Wait for NAT Gateways to be deleted
-            echo "⏳ Waiting for NAT Gateways to be deleted..."
-            sleep 30
-            
-            # Release Elastic IPs
-            echo "🔍 Finding Elastic IPs..."
-            EIP_ALLOCS=$(aws ec2 describe-addresses \
+            # Additional cleanup for any orphaned EIPs
+            echo "🔍 Checking for orphaned EIPs..."
+            aws ec2 describe-addresses \
               --filters "Name=tag:Name,Values=*nat-*" \
-              --query 'Addresses[*].AllocationId' \
-              --output text)
-            
-            for eip in $EIP_ALLOCS; do
-              echo "🗑️ Releasing Elastic IP: $eip"
-              aws ec2 release-address --allocation-id $eip
-            done
-            
-            # Delete Flow Logs
-            echo "🔍 Finding VPC Flow Logs..."
-            FLOW_LOG_IDS=$(aws ec2 describe-flow-logs \
-              --filter "Name=resource-id,Values=$VPC_ID" \
-              --query 'FlowLogs[*].FlowLogId' \
-              --output text)
-            
-            for flow_log in $FLOW_LOG_IDS; do
-              echo "🗑️ Deleting Flow Log: $flow_log"
-              aws ec2 delete-flow-logs --flow-log-ids $flow_log
-            done
+              --query 'Addresses[?AssociationId==null].AllocationId' \
+              --output text | xargs -r -n1 aws ec2 release-address --allocation-id
           fi
 
       - name: Clean Up S3 Resources
