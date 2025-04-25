@@ -5,7 +5,7 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
 
   tags = {
-    Name = "${var.environment}-vanillatstodo-vpc"  // Remove this duplicate
+    Name                                        = "${var.environment}-vanillatstodo-vpc" // Remove this duplicate
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 }
@@ -28,10 +28,10 @@ resource "aws_subnet" "public_a" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                           = "${var.environment}-public-a"
-    "kubernetes.io/cluster/${var.cluster_name}"    = "shared"
-    "kubernetes.io/role/elb"                       = "1"
-    Environment                                    = var.environment
+    Name                                        = "${var.environment}-public-a"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "kubernetes.io/role/elb"                    = "1"
+    Environment                                 = var.environment
   }
 }
 
@@ -43,10 +43,10 @@ resource "aws_subnet" "public_b" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                           = "${var.environment}-public-b"
-    "kubernetes.io/cluster/${var.cluster_name}"    = "shared"
-    "kubernetes.io/role/elb"                       = "1"
-    Environment                                    = var.environment
+    Name                                        = "${var.environment}-public-b"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "kubernetes.io/role/elb"                    = "1"
+    Environment                                 = var.environment
   }
 }
 
@@ -57,10 +57,10 @@ resource "aws_subnet" "private_a" {
   availability_zone = "${var.aws_region}a"
 
   tags = {
-    Name                                           = "${var.environment}-private-a"
-    "kubernetes.io/cluster/${var.cluster_name}"    = "shared"
-    "kubernetes.io/role/internal-elb"              = "1"
-    Environment                                    = var.environment
+    Name                                        = "${var.environment}-private-a"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "kubernetes.io/role/internal-elb"           = "1"
+    Environment                                 = var.environment
   }
 }
 
@@ -70,10 +70,10 @@ resource "aws_subnet" "private_b" {
   availability_zone = "${var.aws_region}b"
 
   tags = {
-    Name                                           = "${var.environment}-private-b"
-    "kubernetes.io/cluster/${var.cluster_name}"    = "shared"
-    "kubernetes.io/role/internal-elb"              = "1"
-    Environment                                    = var.environment
+    Name                                        = "${var.environment}-private-b"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "kubernetes.io/role/internal-elb"           = "1"
+    Environment                                 = var.environment
   }
 }
 
@@ -105,7 +105,7 @@ resource "aws_route_table" "private_a" {
     Name        = "${var.environment}-private-a"
     Environment = var.environment
   }
-  depends_on = [aws_nat_gateway.nat_a]  
+  depends_on = [aws_nat_gateway.nat_a]
 }
 
 resource "aws_route_table" "private_b" {
@@ -120,7 +120,7 @@ resource "aws_route_table" "private_b" {
     Name        = "${var.environment}-private-b"
     Environment = var.environment
   }
-  depends_on = [aws_nat_gateway.nat_b]  
+  depends_on = [aws_nat_gateway.nat_b]
 }
 
 # Create Route table associations
@@ -161,7 +161,7 @@ resource "aws_nat_gateway" "nat_a" {
     Name        = "${var.environment}-nat-a"
     Environment = var.environment
   }
-  depends_on = [aws_internet_gateway.main]    
+  depends_on = [aws_internet_gateway.main]
 }
 
 resource "aws_eip" "nat_b" {
@@ -180,7 +180,7 @@ resource "aws_nat_gateway" "nat_b" {
     Name        = "${var.environment}-nat-b"
     Environment = var.environment
   }
-  depends_on = [aws_internet_gateway.main]  
+  depends_on = [aws_internet_gateway.main]
 }
 
 resource "aws_security_group" "vpc_endpoints" {
@@ -236,7 +236,7 @@ resource "aws_vpc_endpoint" "ecr_api" {
     Name        = "${var.environment}-ecr-api-endpoint"
     Environment = var.environment
   }
-  depends_on = [aws_route_table.private_a, aws_route_table.private_b]  
+  depends_on = [aws_route_table.private_a, aws_route_table.private_b]
 }
 
 # Add ECR DKR endpoint
@@ -252,7 +252,7 @@ resource "aws_vpc_endpoint" "ecr_dkr" {
     Name        = "${var.environment}-ecr-dkr-endpoint"
     Environment = var.environment
   }
-  depends_on = [aws_route_table.private_a, aws_route_table.private_b]  
+  depends_on = [aws_route_table.private_a, aws_route_table.private_b]
 }
 
 # Get current AWS account ID
