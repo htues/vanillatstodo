@@ -4,8 +4,15 @@ metadata:
   name: vanillatstodo
   labels:
     app: vanillatstodo
+    environment: staging
+    version: "0.0.1"
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: vanillatstodo
@@ -13,11 +20,41 @@ spec:
     metadata:
       labels:
         app: vanillatstodo
+        version: "0.0.1"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "80"
     spec:
       containers:
-      - name: vanillatstodo
-        image: hftamayo/vanillatstodo:0.0.1
-        ports:
-        - containerPort: 80
+        - name: vanillatstodo
+          image: hftamayo/vanillatstodo:0.0.1
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          env:
+            - name: NODE_ENV
+              value: "production"
       imagePullSecrets:
-      - name: regcred
+        - name: regcred
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000

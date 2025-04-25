@@ -1,0 +1,81 @@
+name: Deploy Codebase to EKS
+
+on:
+  workflow_call:
+    inputs:
+      cluster_name:
+        required: true
+        type: string
+      cluster_endpoint:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+    outputs:
+      deployment_status:
+        value: ${{ jobs.trigger.outputs.status }}
+
+permissions:
+  contents: read
+  deployments: write
+  repository-projects: write
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      status: ${{ steps.trigger_status.outputs.result }}
+
+    steps:
+      - name: Load Environment Variables
+        run: |
+          cat .github/variables/environment.env >> $GITHUB_ENV
+
+      - name: Generate Timestamp
+        id: timestamp
+        run: echo "value=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+
+      - name: Verify Cluster Details
+        run: |
+          if [ -z "${{ inputs.cluster_endpoint }}" ]; then
+            echo "❌ Missing cluster endpoint"
+            exit 1
+          fi
+          echo "✅ Cluster details verified"
+
+      - name: Trigger App Deployment
+        id: trigger_deployment
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: start-eks-deployment
+          client-payload: |
+            {
+                "cluster_name": "${{ inputs.cluster_name }}",
+                "cluster_endpoint": "${{ inputs.cluster_endpoint }}",
+                "environment": "${{ inputs.environment }}",
+                "triggered_by": "infrastructure-deployment",
+                "timestamp": "${{ steps.timestamp.outputs.value }}"
+            }
+
+      - name: Set Trigger Status
+        id: trigger_status
+        run: |
+          if [ "${{ steps.trigger_deployment.outcome }}" == "success" ]; then
+            echo "result=success" >> $GITHUB_OUTPUT
+          else
+            echo "result=failure" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify Trigger
+        if: always()
+        run: |
+          echo "### App Deployment Trigger Status 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| ------ | ----- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster | ${{ inputs.cluster_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Endpoint | ${{ inputs.cluster_endpoint }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.trigger_status.outputs.result }} |" >> $GITHUB_STEP_SUMMARY

@@ -85,6 +85,43 @@ jobs:
             echo "EKS_STATUS=✅" >> $GITHUB_ENV
           fi
 
+      - name: Clean Up CloudWatch Resources
+        id: cloudwatch_cleanup
+        run: |
+          echo "🔍 Finding CloudWatch resources..."
+
+          # Delete CloudWatch Dashboard
+          echo "🔍 Finding CloudWatch Dashboards..."
+          DASHBOARD_NAME="staging-vanillatstodo-cluster-dashboard"
+          aws cloudwatch delete-dashboards \
+            --dashboard-names "$DASHBOARD_NAME" || true
+
+          # Delete CloudWatch Alarms
+          echo "🔍 Finding CloudWatch Alarms..."
+          aws cloudwatch describe-alarms \
+            --alarm-name-prefix "staging-vanillatstodo-cluster" \
+            --query 'MetricAlarms[*].AlarmName' \
+            --output text | while read -r alarm; do
+            if [ ! -z "$alarm" ]; then
+              echo "🗑️ Deleting alarm: $alarm"
+              aws cloudwatch delete-alarms --alarm-names "$alarm"
+            fi
+          done
+
+          # Delete CloudWatch Log Groups
+          echo "🔍 Finding CloudWatch Log Groups..."
+          aws logs describe-log-groups \
+            --log-group-name-prefix "/aws/eks/vanillatstodo-cluster" \
+            --query 'logGroups[*].logGroupName' \
+            --output text | while read -r log_group; do
+            if [ ! -z "$log_group" ]; then
+              echo "🗑️ Deleting log group: $log_group"
+              aws logs delete-log-group --log-group-name "$log_group"
+            fi
+          done
+
+          echo "CLOUDWATCH_STATUS=✅" >> $GITHUB_ENV
+
       - name: Clean Up Network Resources
         id: network_cleanup
         run: |
@@ -223,53 +260,54 @@ jobs:
           if aws s3api head-bucket --bucket ${{ env.BUCKET_NAME }} 2>/dev/null; then
             echo "📦 Found bucket: ${{ env.BUCKET_NAME }}"
             
-            # Disable versioning
-            echo "🔄 Disabling versioning..."
-            aws s3api put-bucket-versioning \
+            # List and delete all versions
+            echo "🗑️ Deleting all object versions..."
+            aws s3api list-object-versions \
               --bucket ${{ env.BUCKET_NAME }} \
-              --versioning-configuration Status=Suspended
-
-            # Check and delete versions with null handling
-            echo "🗑️ Checking for object versions..."
-            VERSIONS=$(aws s3api list-object-versions \
-              --bucket ${{ env.BUCKET_NAME }} \
-              --output json 2>/dev/null || echo '{"Versions":[]}')
-            
-            if [ "$(echo "$VERSIONS" | jq '.Versions | length')" -gt 0 ]; then
-              echo "Found object versions to delete..."
-              echo "$VERSIONS" | \
-              jq -c '.Versions | map({Key:.Key, VersionId:.VersionId}) | {Objects: ., Quiet: true}' | \
-              aws s3api delete-objects \
+              --output json | \
+            jq -r '.Versions[]? | "\(.Key)\t\(.VersionId)"' | \
+            while IFS=$'\t' read -r key version; do
+              echo "Deleting key: $key version: $version"
+              aws s3api delete-object \
                 --bucket ${{ env.BUCKET_NAME }} \
-                --delete file:///dev/stdin || true
-            else
-              echo "No object versions found"
-            fi
+                --key "$key" \
+                --version-id "$version"
+            done
 
-            # Check and delete markers with null handling
-            echo "🗑️ Checking for delete markers..."
-            MARKERS=$(aws s3api list-object-versions \
+            # Delete delete markers
+            echo "🗑️ Cleaning up delete markers..."
+            aws s3api list-object-versions \
               --bucket ${{ env.BUCKET_NAME }} \
-              --output json 2>/dev/null || echo '{"DeleteMarkers":[]}')
-            
-            if [ "$(echo "$MARKERS" | jq '.DeleteMarkers | length')" -gt 0 ]; then
-              echo "Found delete markers to remove..."
-              echo "$MARKERS" | \
-              jq -c '.DeleteMarkers | map({Key:.Key, VersionId:.VersionId}) | {Objects: ., Quiet: true}' | \
-              aws s3api delete-objects \
+              --output json | \
+            jq -r '.DeleteMarkers[]? | "\(.Key)\t\(.VersionId)"' | \
+            while IFS=$'\t' read -r key version; do
+              echo "Removing delete marker: $key version: $version"
+              aws s3api delete-object \
                 --bucket ${{ env.BUCKET_NAME }} \
-                --delete file:///dev/stdin || true
-            else
-              echo "No delete markers found"
-            fi
+                --key "$key" \
+                --version-id "$version"
+            done
 
-            # Delete bucket
-            echo "🗑️ Deleting bucket..."
-            if aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}; then
-              echo "✅ S3 bucket deleted successfully"
-              echo "S3_STATUS=✅" >> $GITHUB_ENV
+            # Final verification and bucket deletion
+            echo "🔍 Verifying bucket is empty..."
+            sleep 5
+            
+            REMAINING=$(aws s3api list-object-versions \
+              --bucket ${{ env.BUCKET_NAME }} \
+              --output json | \
+              jq '.Versions + .DeleteMarkers | length')
+
+            if [ "$REMAINING" = "0" ]; then
+              echo "🗑️ Deleting empty bucket..."
+              if aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}; then
+                echo "✅ S3 bucket deleted successfully"
+                echo "S3_STATUS=✅" >> $GITHUB_ENV
+              else
+                echo "❌ Failed to delete bucket"
+                echo "S3_STATUS=❌" >> $GITHUB_ENV
+              fi
             else
-              echo "❌ Failed to delete S3 bucket"
+              echo "⚠️ Bucket still contains objects"
               echo "S3_STATUS=❌" >> $GITHUB_ENV
             fi
           else
@@ -284,6 +322,7 @@ jobs:
           echo "| Resource | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "| -------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
           echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: 1.31 |" >> $GITHUB_STEP_SUMMARY
+          echo "| CloudWatch | ${CLOUDWATCH_STATUS:-❌} | Monitoring |" >> $GITHUB_STEP_SUMMARY
           echo "| VPC Resources | ${VPC_STATUS:-❌} | Network Stack |" >> $GITHUB_STEP_SUMMARY
           echo "| S3 State | ${S3_STATUS:-❌} | Terraform State |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
