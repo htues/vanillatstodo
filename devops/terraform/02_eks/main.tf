@@ -3,6 +3,42 @@ data "aws_iam_role" "eks_cluster" {
   name = "${var.environment}-${var.cluster_name}-role"
 }
 
+data "terraform_remote_state" "network" {
+  backend = "s3"
+  config = {
+    bucket = "vanillatstodo-terraform-state"
+    key    = "staging/network.tfstate"
+    region = "us-east-2"
+  }
+}
+
+# Local variables
+locals {
+  vpc_id          = data.terraform_remote_state.network.outputs.vpc_id
+  private_subnets = data.terraform_remote_state.network.outputs.private_subnet_ids
+  public_subnets  = data.terraform_remote_state.network.outputs.public_subnet_ids
+  all_subnets     = concat(local.private_subnets, local.public_subnets)
+}
+
+# Security group for EKS
+resource "aws_security_group" "eks_cluster" {
+  name        = "${var.environment}-eks-cluster-sg"
+  description = "Security group for EKS cluster"
+  vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.environment}-${var.cluster_name}-sg"
+    Environment = var.environment
+  }
+}
+
 # EKS Cluster configuration
 resource "aws_eks_cluster" "main" {
   name     = var.cluster_name
@@ -23,24 +59,5 @@ resource "aws_eks_cluster" "main" {
     Environment = var.environment
     ManagedBy   = "terraform"
     Version     = "1.31"
-  }
-}
-
-# Security group for EKS
-resource "aws_security_group" "eks_cluster" {
-  name        = "${var.environment}-eks-cluster-sg"
-  description = "Security group for EKS cluster"
-  vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name        = "${var.environment}-${var.cluster_name}-sg"
-    Environment = var.environment
   }
 }
