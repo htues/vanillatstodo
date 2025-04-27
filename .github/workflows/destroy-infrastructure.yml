@@ -125,7 +125,7 @@ jobs:
       - name: Clean Up Network Resources
         id: network_cleanup
         run: |
-          echo "🔍 Finding NAT Gateways and EIPs..."
+          echo "🔍 Finding VPC and related resources..."
           VPC_ID=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Name,Values=*vanillatstodo*" \
             --query 'Vpcs[0].VpcId' \
@@ -136,51 +136,91 @@ jobs:
           if [ "$VPC_ID" != "None" ] && [ ! -z "$VPC_ID" ]; then
             echo "DEBUG: Processing VPC: $VPC_ID"
             
-            # Get NAT Gateways and their associated EIPs
+            # Delete VPC Endpoints first
+            echo "🔍 Deleting VPC Endpoints..."
+            ENDPOINTS=$(aws ec2 describe-vpc-endpoints \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'VpcEndpoints[*].VpcEndpointId' \
+              --output text)
+            for endpoint in $ENDPOINTS; do
+              echo "🗑️ Deleting endpoint: $endpoint"
+              aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $endpoint
+            done
+
+            # Delete NAT Gateways and EIPs
+            echo "🔍 Deleting NAT Gateways..."
             NAT_GATEWAYS=$(aws ec2 describe-nat-gateways \
               --filter "Name=vpc-id,Values=$VPC_ID" \
               --query 'NatGateways[*].[NatGatewayId,NatGatewayAddresses[0].AllocationId]' \
               --output text)
             
-            echo "DEBUG: Found NAT Gateways: $NAT_GATEWAYS"
-            
-            if [ -z "$NAT_GATEWAYS" ]; then
-              echo "ℹ️ No NAT Gateways found in VPC"
-            else
-              while IFS=$'\t' read -r nat_id eip_id; do
-                if [ ! -z "$nat_id" ]; then
-                  echo "🗑️ Deleting NAT Gateway: $nat_id"
-                  aws ec2 delete-nat-gateway --nat-gateway-id $nat_id
-                  
-                  echo "⏳ Waiting for NAT Gateway deletion..."
-                  aws ec2 wait nat-gateway-deleted --nat-gateway-ids $nat_id
-                  
-                  if [ ! -z "$eip_id" ]; then
-                    echo "🗑️ Now releasing EIP: $eip_id"
-                    aws ec2 release-address --allocation-id $eip_id || true
-                  fi
-                fi
-              done <<< "$NAT_GATEWAYS"
-            fi
-            
-            # Check for orphaned EIPs with detailed output
-            echo "🔍 Checking for orphaned EIPs..."
-            ORPHANED_EIPS=$(aws ec2 describe-addresses \
-              --filters "Name=tag:Name,Values=*nat-*" \
-              --query 'Addresses[?AssociationId==null].[AllocationId,PublicIp]' \
-              --output text)
-            
-            if [ -z "$ORPHANED_EIPS" ]; then
-              echo "ℹ️ No orphaned EIPs found"
-            else
-              echo "Found orphaned EIPs: $ORPHANED_EIPS"
-              while IFS=$'\t' read -r eip_id public_ip; do
+            while IFS=$'\t' read -r nat_id eip_id; do
+              if [ ! -z "$nat_id" ]; then
+                echo "🗑️ Deleting NAT Gateway: $nat_id"
+                aws ec2 delete-nat-gateway --nat-gateway-id $nat_id
+                aws ec2 wait nat-gateway-deleted --nat-gateway-ids $nat_id
+                
                 if [ ! -z "$eip_id" ]; then
-                  echo "🗑️ Releasing orphaned EIP: $eip_id ($public_ip)"
+                  echo "🗑️ Releasing EIP: $eip_id"
                   aws ec2 release-address --allocation-id $eip_id || true
                 fi
-              done <<< "$ORPHANED_EIPS"
+              fi
+            done <<< "$NAT_GATEWAYS"
+
+            # Delete Route Tables
+            echo "🔍 Deleting Route Tables..."
+            RT_IDS=$(aws ec2 describe-route-tables \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' \
+              --output text)
+            for rt in $RT_IDS; do
+              echo "🗑️ Deleting route table: $rt"
+              ASSOC_IDS=$(aws ec2 describe-route-tables \
+                --route-table-id $rt \
+                --query 'RouteTables[0].Associations[*].RouteTableAssociationId' \
+                --output text)
+              for assoc in $ASSOC_IDS; do
+                aws ec2 disassociate-route-table --association-id $assoc
+              done
+              aws ec2 delete-route-table --route-table-id $rt
+            done
+
+            # Delete Subnets
+            echo "🔍 Deleting Subnets..."
+            SUBNET_IDS=$(aws ec2 describe-subnets \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'Subnets[*].SubnetId' \
+              --output text)
+            for subnet in $SUBNET_IDS; do
+              echo "🗑️ Deleting subnet: $subnet"
+              aws ec2 delete-subnet --subnet-id $subnet
+            done
+
+            # Detach and Delete Internet Gateway
+            echo "🔍 Deleting Internet Gateway..."
+            IGW_ID=$(aws ec2 describe-internet-gateways \
+              --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+              --query 'InternetGateways[0].InternetGatewayId' \
+              --output text)
+            if [ ! -z "$IGW_ID" ]; then
+              aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
+              aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID
             fi
+
+            # Delete Network ACLs (except default)
+            echo "🔍 Deleting Network ACLs..."
+            NACL_IDS=$(aws ec2 describe-network-acls \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'NetworkAcls[?!IsDefault].NetworkAclId' \
+              --output text)
+            for nacl in $NACL_IDS; do
+              echo "🗑️ Deleting NACL: $nacl"
+              aws ec2 delete-network-acl --network-acl-id $nacl
+            done
+
+            # Finally Delete VPC
+            echo "🗑️ Deleting VPC: $VPC_ID"
+            aws ec2 delete-vpc --vpc-id $VPC_ID
           else
             echo "ℹ️ No VPC found matching the filter"
           fi
