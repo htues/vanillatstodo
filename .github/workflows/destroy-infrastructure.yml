@@ -130,36 +130,53 @@ jobs:
             ["ENDPOINTS"]=0
             ["NAT"]=0
             ["EIP"]=0
-            # ...existing counter initializations...
+            ["INTERFACES"]=0
+            ["SECURITY_GROUPS"]=0
+            ["ROUTE_TABLES"]=0
+            ["NACLS"]=0
+            ["SUBNETS"]=0
+            ["IGW"]=0
+            ["VPC"]=0
           )
 
           declare -A TOTAL_COUNT=(
             ["ENDPOINTS"]=0
             ["NAT"]=0
             ["EIP"]=0
-            # ...existing counter initializations...
+            ["INTERFACES"]=0
+            ["SECURITY_GROUPS"]=0
+            ["ROUTE_TABLES"]=0
+            ["NACLS"]=0
+            ["SUBNETS"]=0
+            ["IGW"]=0
+            ["VPC"]=0
           )
 
           # Clean up EIPs with staging-nat pattern
           echo "🔍 Finding EIPs with staging-nat pattern..."
           STAGING_EIPS=$(aws ec2 describe-addresses \
-            --query 'Addresses[?starts_with(Tags[?Key==`Name`].Value | [0], `staging-nat-`)].{Id:AllocationId,Name:Tags[?Key==`Name`].Value|[0]}' \
+            --filters "Name=tag:Name,Values=staging-nat-*" \
+            --query 'Addresses[*].AllocationId' \
             --output text || echo "")
 
           if [ ! -z "$STAGING_EIPS" ]; then
-            while IFS=$'\t' read -r eip_id eip_name; do
-              if [ ! -z "$eip_id" ]; then
+            for eip in $STAGING_EIPS; do
+              if [ ! -z "$eip" ]; then
                 ((TOTAL_COUNT["EIP"]++))
-                echo "   Releasing EIP: $eip_name ($eip_id)"
-                if aws ec2 release-address --allocation-id $eip_id; then
+                EIP_NAME=$(aws ec2 describe-addresses \
+                  --allocation-ids $eip \
+                  --query 'Addresses[0].Tags[?Key==`Name`].Value' \
+                  --output text)
+                echo "   Releasing EIP: $EIP_NAME ($eip)"
+                if aws ec2 release-address --allocation-id $eip; then
                   ((CLEANED_COUNT["EIP"]++))
-                  echo "   ✅ Successfully released EIP: $eip_name"
+                  echo "   ✅ Successfully released EIP: $EIP_NAME"
                 else
-                  echo "   ⚠️ Failed to release EIP: $eip_name"
+                  echo "   ⚠️ Failed to release EIP: $EIP_NAME"
                 fi
                 sleep 2
               fi
-            done <<< "$STAGING_EIPS"
+            done
           else
             echo "   No staging NAT EIPs found"
           fi
