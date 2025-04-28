@@ -230,14 +230,20 @@ jobs:
             echo "🔍 Finding Internet Gateway..."
             IGW_ID=$(aws ec2 describe-internet-gateways \
               --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
-              --query 'InternetGateways[0].InternetGatewayId' \
+              --query 'InternetGateways[*].InternetGatewayId' \
               --output text)
             
-            if [ ! -z "$IGW_ID" ]; then
+            if [ ! -z "$IGW_ID" ] && [ "$IGW_ID" != "None" ]; then
+              echo "🗑️ Detaching and deleting IGW: $IGW_ID"
               if ! aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID || \
                  ! aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID; then
                 IGW_STATUS="❌"
+                echo "⚠️ Failed to cleanup IGW: $IGW_ID"
+              else
+                echo "✅ Successfully deleted IGW: $IGW_ID"
               fi
+            else
+              echo "ℹ️ No Internet Gateway found for VPC: $VPC_ID"
             fi
 
             # Final VPC Cleanup
