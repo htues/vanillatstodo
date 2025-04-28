@@ -124,11 +124,13 @@ jobs:
 
       - name: Clean Up Network Resources
         id: network_cleanup
+
         run: |
           # Initialize counters and status tracking
           declare -A CLEANED_COUNT=(
             ["ENDPOINTS"]=0
             ["NAT"]=0
+            ["EIP"]=0
             ["INTERFACES"]=0
             ["SECURITY_GROUPS"]=0
             ["ROUTE_TABLES"]=0
@@ -141,6 +143,7 @@ jobs:
           declare -A TOTAL_COUNT=(
             ["ENDPOINTS"]=0
             ["NAT"]=0
+            ["EIP"]=0
             ["INTERFACES"]=0
             ["SECURITY_GROUPS"]=0
             ["ROUTE_TABLES"]=0
@@ -149,6 +152,46 @@ jobs:
             ["IGW"]=0
             ["VPC"]=0
           )
+
+          # First clean up any orphaned EIPs
+          echo "🔍 Finding orphaned EIPs..."
+          EIP_IDS=$(aws ec2 describe-addresses \
+            --filters "Name=tag:Name,Values=*nat*" \
+            --query 'Addresses[?AssociationId==null].AllocationId' \
+            --output text)
+
+          for eip in $EIP_IDS; do
+            ((TOTAL_COUNT["EIP"]++))
+            echo "   Releasing orphaned EIP: $eip"
+            if aws ec2 release-address --allocation-id $eip; then
+              ((CLEANED_COUNT["EIP"]++))
+              echo "   ✅ Successfully released EIP: $eip"
+            else
+              echo "   ⚠️ Failed to release EIP: $eip"
+            fi
+            sleep 2
+          done
+
+          # Check specific EIPs by IP
+          KNOWN_IPS=("18.191.81.155" "18.218.99.190" "52.14.120.82" "52.14.254.65")
+          for ip in "${KNOWN_IPS[@]}"; do
+            EIP_ID=$(aws ec2 describe-addresses \
+              --public-ips $ip \
+              --query 'Addresses[0].AllocationId' \
+              --output text)
+            
+            if [ ! -z "$EIP_ID" ] && [ "$EIP_ID" != "None" ]; then
+              ((TOTAL_COUNT["EIP"]++))
+              echo "   Releasing EIP by IP: $ip (ID: $EIP_ID)"
+              if aws ec2 release-address --allocation-id $EIP_ID; then
+                ((CLEANED_COUNT["EIP"]++))
+                echo "   ✅ Successfully released EIP: $ip"
+              else
+                echo "   ⚠️ Failed to release EIP: $ip"
+              fi
+              sleep 2
+            fi
+          done          
 
           echo "🔍 Finding all VPCs with vanillatstodo tag..."
           VPC_IDS=$(aws ec2 describe-vpcs \
@@ -320,7 +363,8 @@ jobs:
             done
 
             # Set overall network status
-            if [ "${CLEANED_COUNT[VPC]}" -eq "${TOTAL_COUNT[VPC]}" ]; then
+            if [ "${CLEANED_COUNT[VPC]}" -eq "${TOTAL_COUNT[VPC]}" ] && \
+               [ "${CLEANED_COUNT[EIP]}" -eq "${TOTAL_COUNT[EIP]}" ]; then
               echo "NETWORK_STATUS=✅" >> $GITHUB_ENV
             else
               echo "NETWORK_STATUS=❌" >> $GITHUB_ENV
@@ -399,6 +443,7 @@ jobs:
           echo "| CloudWatch | ${CLOUDWATCH_STATUS:-❌} | Monitoring |" >> $GITHUB_STEP_SUMMARY
 
           # Network resources with cleanup details
+          echo "| Network - EIP | ${NETWORK_EIP_STATUS:-❌} | Cleaned: ${EIP_CLEANED:-0} of ${EIP_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
           echo "| Network - VPC Endpoints | ${NETWORK_ENDPOINTS_STATUS:-❌} | Cleaned: ${ENDPOINTS_CLEANED:-0} of ${ENDPOINTS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
           echo "| Network - NAT & EIP | ${NETWORK_NAT_STATUS:-❌} | Cleaned: ${NATS_CLEANED:-0} of ${NATS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
           echo "| Network - Route Tables | ${NETWORK_ROUTE_STATUS:-❌} | Cleaned: ${ROUTES_CLEANED:-0} of ${ROUTES_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
