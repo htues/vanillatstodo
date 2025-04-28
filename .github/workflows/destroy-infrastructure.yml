@@ -127,26 +127,28 @@ jobs:
         run: |
           CLEANUP_FAILED=0
 
-          echo "🔍 Finding VPC with vanillatstodo tag..."
-          VPC_ID=$(aws ec2 describe-vpcs \
+          echo "🔍 Finding all VPCs with vanillatstodo tag..."
+          VPC_IDS=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Name,Values=*vanillatstodo*" \
-            --query 'Vpcs[0].VpcId' \
+            --query 'Vpcs[*].VpcId' \
             --output text)
 
-          if [ "$VPC_ID" != "None" ] && [ ! -z "$VPC_ID" ]; then
-            # Debug VPC Dependencies
-            echo "📋 Checking VPC dependencies..."
+          for VPC_ID in $VPC_IDS; do
+            echo "🔄 Processing VPC: $VPC_ID"
+            
+            # Debug current VPC state
+            echo "📋 VPC Resources Summary:"
             echo "VPC Endpoints:"
             aws ec2 describe-vpc-endpoints \
               --filters "Name=vpc-id,Values=$VPC_ID" \
-              --query 'VpcEndpoints[*].[VpcEndpointId,State]' \
-              --output table
+              --query 'length(VpcEndpoints)' \
+              --output text
 
             echo "NAT Gateways:"
             aws ec2 describe-nat-gateways \
               --filter "Name=vpc-id,Values=$VPC_ID" \
-              --query 'NatGateways[*].[NatGatewayId,State]' \
-              --output table
+              --query 'length(NatGateways)' \
+              --output text
 
             # 1. VPC Endpoints
             echo "🗑️ Cleaning up VPC Endpoints..."
@@ -168,7 +170,7 @@ jobs:
             echo "🗑️ Cleaning up NAT Gateways..."
             NAT_IDS=$(aws ec2 describe-nat-gateways \
               --filter "Name=vpc-id,Values=$VPC_ID" \
-              --query 'NatGateways[*].NatGatewayId' \
+              --query 'NatGateways[?State!=`deleted`].NatGatewayId' \
               --output text)
             
             for nat in $NAT_IDS; do
@@ -179,8 +181,10 @@ jobs:
               fi
             done
             
-            echo "⏳ Waiting for NAT Gateways to be deleted..."
-            sleep 30
+            if [ ! -z "$NAT_IDS" ]; then
+              echo "⏳ Waiting for NAT Gateways to be deleted..."
+              sleep 30
+            fi
 
             # 3. Network Interfaces
             echo "🗑️ Cleaning up Network Interfaces..."
@@ -195,6 +199,7 @@ jobs:
                 CLEANUP_FAILED=1
                 echo "⚠️ Failed to delete Network Interface: $eni"
               fi
+              sleep 2
             done
 
             # 4. Security Groups (except default)
@@ -210,6 +215,7 @@ jobs:
                 CLEANUP_FAILED=1
                 echo "⚠️ Failed to delete Security Group: $sg"
               fi
+              sleep 2
             done
 
             # 5. Route Tables (non-main)
@@ -238,6 +244,7 @@ jobs:
                 CLEANUP_FAILED=1
                 echo "⚠️ Failed to delete route table: $rt"
               fi
+              sleep 2
             done
 
             # 6. Network ACLs (non-default)
@@ -253,6 +260,7 @@ jobs:
                 CLEANUP_FAILED=1
                 echo "⚠️ Failed to delete Network ACL: $nacl"
               fi
+              sleep 2
             done
 
             # 7. Subnets
@@ -268,6 +276,7 @@ jobs:
                 CLEANUP_FAILED=1
                 echo "⚠️ Failed to delete subnet: $subnet"
               fi
+              sleep 2
             done
 
             # 8. Internet Gateway
@@ -284,6 +293,7 @@ jobs:
                 CLEANUP_FAILED=1
                 echo "⚠️ Failed to cleanup IGW: $IGW_ID"
               fi
+              sleep 2
             fi
 
             # 9. Finally Delete VPC
@@ -293,17 +303,16 @@ jobs:
               echo "⚠️ Failed to delete VPC: $VPC_ID"
             fi
 
-            # Set final status
-            if [ $CLEANUP_FAILED -eq 0 ]; then
-              echo "✅ Network cleanup completed successfully"
-              echo "NETWORK_STATUS=✅" >> $GITHUB_ENV
-            else
-              echo "⚠️ Network cleanup completed with errors"
-              echo "NETWORK_STATUS=❌" >> $GITHUB_ENV
-            fi
-          else
-            echo "ℹ️ No VPC found matching the filter"
+            echo "✅ Completed processing VPC: $VPC_ID"
+          done
+
+          # Set final status
+          if [ $CLEANUP_FAILED -eq 0 ]; then
+            echo "✅ Network cleanup completed successfully"
             echo "NETWORK_STATUS=✅" >> $GITHUB_ENV
+          else
+            echo "⚠️ Network cleanup completed with errors"
+            echo "NETWORK_STATUS=❌" >> $GITHUB_ENV
           fi
 
       - name: Clean Up S3 Resources
