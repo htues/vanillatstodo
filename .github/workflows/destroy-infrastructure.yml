@@ -125,7 +125,30 @@ jobs:
       - name: Clean Up Network Resources
         id: network_cleanup
         run: |
-          CLEANUP_FAILED=0
+          # Initialize counters and status tracking
+          declare -A CLEANED_COUNT=(
+            ["ENDPOINTS"]=0
+            ["NAT"]=0
+            ["INTERFACES"]=0
+            ["SECURITY_GROUPS"]=0
+            ["ROUTE_TABLES"]=0
+            ["NACLS"]=0
+            ["SUBNETS"]=0
+            ["IGW"]=0
+            ["VPC"]=0
+          )
+
+          declare -A TOTAL_COUNT=(
+            ["ENDPOINTS"]=0
+            ["NAT"]=0
+            ["INTERFACES"]=0
+            ["SECURITY_GROUPS"]=0
+            ["ROUTE_TABLES"]=0
+            ["NACLS"]=0
+            ["SUBNETS"]=0
+            ["IGW"]=0
+            ["VPC"]=0
+          )
 
           echo "🔍 Finding all VPCs with vanillatstodo tag..."
           VPC_IDS=$(aws ec2 describe-vpcs \
@@ -134,21 +157,8 @@ jobs:
             --output text)
 
           for VPC_ID in $VPC_IDS; do
+            ((TOTAL_COUNT["VPC"]++))
             echo "🔄 Processing VPC: $VPC_ID"
-            
-            # Debug current VPC state
-            echo "📋 VPC Resources Summary:"
-            echo "VPC Endpoints:"
-            aws ec2 describe-vpc-endpoints \
-              --filters "Name=vpc-id,Values=$VPC_ID" \
-              --query 'length(VpcEndpoints)' \
-              --output text
-
-            echo "NAT Gateways:"
-            aws ec2 describe-nat-gateways \
-              --filter "Name=vpc-id,Values=$VPC_ID" \
-              --query 'length(NatGateways)' \
-              --output text
 
             # 1. VPC Endpoints
             echo "🗑️ Cleaning up VPC Endpoints..."
@@ -158,10 +168,10 @@ jobs:
               --output text)
             
             for endpoint in $ENDPOINTS; do
+              ((TOTAL_COUNT["ENDPOINTS"]++))
               echo "   Deleting endpoint: $endpoint"
-              if ! aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $endpoint; then
-                CLEANUP_FAILED=1
-                echo "⚠️ Failed to delete endpoint: $endpoint"
+              if aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $endpoint; then
+                ((CLEANED_COUNT["ENDPOINTS"]++))
               fi
               sleep 5
             done
@@ -174,17 +184,14 @@ jobs:
               --output text)
             
             for nat in $NAT_IDS; do
+              ((TOTAL_COUNT["NAT"]++))
               echo "   Deleting NAT Gateway: $nat"
-              if ! aws ec2 delete-nat-gateway --nat-gateway-id $nat; then
-                CLEANUP_FAILED=1
-                echo "⚠️ Failed to delete NAT Gateway: $nat"
+              if aws ec2 delete-nat-gateway --nat-gateway-id $nat; then
+                ((CLEANED_COUNT["NAT"]++))
               fi
             done
-            
-            if [ ! -z "$NAT_IDS" ]; then
-              echo "⏳ Waiting for NAT Gateways to be deleted..."
-              sleep 30
-            fi
+
+            [ ! -z "$NAT_IDS" ] && sleep 45
 
             # 3. Network Interfaces
             echo "🗑️ Cleaning up Network Interfaces..."
@@ -194,15 +201,20 @@ jobs:
               --output text)
             
             for eni in $ENI_IDS; do
-              echo "   Deleting Network Interface: $eni"
-              if ! aws ec2 delete-network-interface --network-interface-id $eni; then
-                CLEANUP_FAILED=1
-                echo "⚠️ Failed to delete Network Interface: $eni"
+              ((TOTAL_COUNT["INTERFACES"]++))
+              if aws ec2 describe-network-interfaces \
+                --network-interface-ids $eni \
+                --query 'NetworkInterfaces[0].Status' \
+                --output text | grep -q "available"; then
+                echo "   Deleting Network Interface: $eni"
+                if aws ec2 delete-network-interface --network-interface-id $eni; then
+                  ((CLEANED_COUNT["INTERFACES"]++))
+                fi
               fi
               sleep 2
             done
 
-            # 4. Security Groups (except default)
+            # 4. Security Groups
             echo "🗑️ Cleaning up Security Groups..."
             SG_IDS=$(aws ec2 describe-security-groups \
               --filters "Name=vpc-id,Values=$VPC_ID" \
@@ -210,15 +222,15 @@ jobs:
               --output text)
             
             for sg in $SG_IDS; do
+              ((TOTAL_COUNT["SECURITY_GROUPS"]++))
               echo "   Deleting Security Group: $sg"
-              if ! aws ec2 delete-security-group --group-id $sg; then
-                CLEANUP_FAILED=1
-                echo "⚠️ Failed to delete Security Group: $sg"
+              if aws ec2 delete-security-group --group-id $sg; then
+                ((CLEANED_COUNT["SECURITY_GROUPS"]++))
               fi
               sleep 2
             done
 
-            # 5. Route Tables (non-main)
+            # 5. Route Tables
             echo "🗑️ Cleaning up Route Tables..."
             RT_IDS=$(aws ec2 describe-route-tables \
               --filters "Name=vpc-id,Values=$VPC_ID" \
@@ -226,28 +238,23 @@ jobs:
               --output text)
             
             for rt in $RT_IDS; do
+              ((TOTAL_COUNT["ROUTE_TABLES"]++))
               ASSOC_IDS=$(aws ec2 describe-route-tables \
                 --route-table-id $rt \
                 --query 'RouteTables[0].Associations[*].RouteTableAssociationId' \
                 --output text)
               
               for assoc in $ASSOC_IDS; do
-                echo "   Disassociating route table: $assoc"
-                if ! aws ec2 disassociate-route-table --association-id $assoc; then
-                  CLEANUP_FAILED=1
-                  echo "⚠️ Failed to disassociate route table: $assoc"
-                fi
+                aws ec2 disassociate-route-table --association-id $assoc
               done
               
-              echo "   Deleting route table: $rt"
-              if ! aws ec2 delete-route-table --route-table-id $rt; then
-                CLEANUP_FAILED=1
-                echo "⚠️ Failed to delete route table: $rt"
+              if aws ec2 delete-route-table --route-table-id $rt; then
+                ((CLEANED_COUNT["ROUTE_TABLES"]++))
               fi
               sleep 2
             done
 
-            # 6. Network ACLs (non-default)
+            # 6. Network ACLs
             echo "🗑️ Cleaning up Network ACLs..."
             NACL_IDS=$(aws ec2 describe-network-acls \
               --filters "Name=vpc-id,Values=$VPC_ID" \
@@ -255,10 +262,9 @@ jobs:
               --output text)
             
             for nacl in $NACL_IDS; do
-              echo "   Deleting Network ACL: $nacl"
-              if ! aws ec2 delete-network-acl --network-acl-id $nacl; then
-                CLEANUP_FAILED=1
-                echo "⚠️ Failed to delete Network ACL: $nacl"
+              ((TOTAL_COUNT["NACLS"]++))
+              if aws ec2 delete-network-acl --network-acl-id $nacl; then
+                ((CLEANED_COUNT["NACLS"]++))
               fi
               sleep 2
             done
@@ -271,10 +277,9 @@ jobs:
               --output text)
             
             for subnet in $SUBNET_IDS; do
-              echo "   Deleting subnet: $subnet"
-              if ! aws ec2 delete-subnet --subnet-id $subnet; then
-                CLEANUP_FAILED=1
-                echo "⚠️ Failed to delete subnet: $subnet"
+              ((TOTAL_COUNT["SUBNETS"]++))
+              if aws ec2 delete-subnet --subnet-id $subnet; then
+                ((CLEANED_COUNT["SUBNETS"]++))
               fi
               sleep 2
             done
@@ -287,33 +292,40 @@ jobs:
               --output text)
             
             if [ ! -z "$IGW_ID" ] && [ "$IGW_ID" != "None" ]; then
-              echo "   Detaching and deleting IGW: $IGW_ID"
-              if ! aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID || \
-                 ! aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID; then
-                CLEANUP_FAILED=1
-                echo "⚠️ Failed to cleanup IGW: $IGW_ID"
+              ((TOTAL_COUNT["IGW"]++))
+              if aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID && \
+                 aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID; then
+                ((CLEANED_COUNT["IGW"]++))
               fi
               sleep 2
             fi
 
-            # 9. Finally Delete VPC
+            # 9. VPC
             echo "🗑️ Deleting VPC: $VPC_ID"
-            if ! aws ec2 delete-vpc --vpc-id $VPC_ID; then
-              CLEANUP_FAILED=1
-              echo "⚠️ Failed to delete VPC: $VPC_ID"
+            if aws ec2 delete-vpc --vpc-id $VPC_ID; then
+              ((CLEANED_COUNT["VPC"]++))
             fi
-
-            echo "✅ Completed processing VPC: $VPC_ID"
           done
 
-          # Set final status
-          if [ $CLEANUP_FAILED -eq 0 ]; then
-            echo "✅ Network cleanup completed successfully"
-            echo "NETWORK_STATUS=✅" >> $GITHUB_ENV
-          else
-            echo "⚠️ Network cleanup completed with errors"
-            echo "NETWORK_STATUS=❌" >> $GITHUB_ENV
-          fi
+          # Update GitHub Environment variables with counts and status
+          {
+            for resource in "${!CLEANED_COUNT[@]}"; do
+              echo "${resource}_CLEANED=${CLEANED_COUNT[$resource]}" >> $GITHUB_ENV
+              echo "${resource}_TOTAL=${TOTAL_COUNT[$resource]}" >> $GITHUB_ENV
+              if [ "${CLEANED_COUNT[$resource]}" -eq "${TOTAL_COUNT[$resource]}" ]; then
+                echo "NETWORK_${resource}_STATUS=✅" >> $GITHUB_ENV
+              else
+                echo "NETWORK_${resource}_STATUS=❌" >> $GITHUB_ENV
+              fi
+            done
+
+            # Set overall network status
+            if [ "${CLEANED_COUNT[VPC]}" -eq "${TOTAL_COUNT[VPC]}" ]; then
+              echo "NETWORK_STATUS=✅" >> $GITHUB_ENV
+            else
+              echo "NETWORK_STATUS=❌" >> $GITHUB_ENV
+            fi
+          }
 
       - name: Clean Up S3 Resources
         id: s3_cleanup
@@ -386,13 +398,14 @@ jobs:
           echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: 1.31 |" >> $GITHUB_STEP_SUMMARY
           echo "| CloudWatch | ${CLOUDWATCH_STATUS:-❌} | Monitoring |" >> $GITHUB_STEP_SUMMARY
 
-          # Network Resources Detail
-          echo "| Network - VPC Endpoints | ${NETWORK_ENDPOINTS_STATUS:-❌} | Interface Endpoints |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network - NAT & EIP | ${NETWORK_NAT_STATUS:-❌} | NAT Gateways |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network - Route Tables | ${NETWORK_ROUTE_STATUS:-❌} | Routing |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network - NACLs | ${NETWORK_NACL_STATUS:-❌} | Network ACLs |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network - Subnets | ${NETWORK_SUBNET_STATUS:-❌} | Subnet Resources |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network - IGW | ${NETWORK_IGW_STATUS:-❌} | Internet Gateway |" >> $GITHUB_STEP_SUMMARY
+          # Network resources with cleanup details
+          echo "| Network - VPC Endpoints | ${NETWORK_ENDPOINTS_STATUS:-❌} | Cleaned: ${ENDPOINTS_CLEANED:-0} of ${ENDPOINTS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - NAT & EIP | ${NETWORK_NAT_STATUS:-❌} | Cleaned: ${NATS_CLEANED:-0} of ${NATS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - Route Tables | ${NETWORK_ROUTE_STATUS:-❌} | Cleaned: ${ROUTES_CLEANED:-0} of ${ROUTES_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - NACLs | ${NETWORK_NACL_STATUS:-❌} | Cleaned: ${NACLS_CLEANED:-0} of ${NACLS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - Subnets | ${NETWORK_SUBNET_STATUS:-❌} | Cleaned: ${SUBNETS_CLEANED:-0} of ${SUBNETS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - IGW | ${NETWORK_IGW_STATUS:-❌} | Cleaned: ${IGW_CLEANED:-0} of ${IGW_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - VPCs | ${NETWORK_VPC_STATUS:-❌} | Cleaned: ${VPCS_CLEANED:-0} of ${VPCS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
           echo "| Network - Overall | ${NETWORK_STATUS:-❌} | Network Stack |" >> $GITHUB_STEP_SUMMARY
 
           echo "| S3 State | ${S3_STATUS:-❌} | Terraform State |" >> $GITHUB_STEP_SUMMARY
