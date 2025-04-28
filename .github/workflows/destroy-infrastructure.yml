@@ -124,74 +124,45 @@ jobs:
 
       - name: Clean Up Network Resources
         id: network_cleanup
-
         run: |
           # Initialize counters and status tracking
           declare -A CLEANED_COUNT=(
             ["ENDPOINTS"]=0
             ["NAT"]=0
             ["EIP"]=0
-            ["INTERFACES"]=0
-            ["SECURITY_GROUPS"]=0
-            ["ROUTE_TABLES"]=0
-            ["NACLS"]=0
-            ["SUBNETS"]=0
-            ["IGW"]=0
-            ["VPC"]=0
+            # ...existing counter initializations...
           )
 
           declare -A TOTAL_COUNT=(
             ["ENDPOINTS"]=0
             ["NAT"]=0
             ["EIP"]=0
-            ["INTERFACES"]=0
-            ["SECURITY_GROUPS"]=0
-            ["ROUTE_TABLES"]=0
-            ["NACLS"]=0
-            ["SUBNETS"]=0
-            ["IGW"]=0
-            ["VPC"]=0
+            # ...existing counter initializations...
           )
 
-          # First clean up any orphaned EIPs
-          echo "🔍 Finding orphaned EIPs..."
-          EIP_IDS=$(aws ec2 describe-addresses \
-            --filters "Name=tag:Name,Values=*nat*" \
-            --query 'Addresses[?AssociationId==null].AllocationId' \
-            --output text)
+          # Clean up EIPs with staging-nat pattern
+          echo "🔍 Finding EIPs with staging-nat pattern..."
+          STAGING_EIPS=$(aws ec2 describe-addresses \
+            --query 'Addresses[?starts_with(Tags[?Key==`Name`].Value | [0], `staging-nat-`)].{Id:AllocationId,Name:Tags[?Key==`Name`].Value|[0]}' \
+            --output text || echo "")
 
-          for eip in $EIP_IDS; do
-            ((TOTAL_COUNT["EIP"]++))
-            echo "   Releasing orphaned EIP: $eip"
-            if aws ec2 release-address --allocation-id $eip; then
-              ((CLEANED_COUNT["EIP"]++))
-              echo "   ✅ Successfully released EIP: $eip"
-            else
-              echo "   ⚠️ Failed to release EIP: $eip"
-            fi
-            sleep 2
-          done
-
-          # Check specific EIPs by IP
-          KNOWN_IPS=("18.191.81.155" "18.218.99.190" "52.14.120.82" "52.14.254.65")
-          for ip in "${KNOWN_IPS[@]}"; do
-            EIP_ID=$(aws ec2 describe-addresses \
-              --public-ips $ip \
-              --query 'Addresses[0].AllocationId' \
-              --output text)
-            
-            if [ ! -z "$EIP_ID" ] && [ "$EIP_ID" != "None" ]; then
-              ((TOTAL_COUNT["EIP"]++))
-              echo "   Releasing EIP by IP: $ip (ID: $EIP_ID)"
-              if aws ec2 release-address --allocation-id $EIP_ID; then
-                ((CLEANED_COUNT["EIP"]++))
-                echo "   ✅ Successfully released EIP: $ip"
-              else
-                echo "   ⚠️ Failed to release EIP: $ip"
+          if [ ! -z "$STAGING_EIPS" ]; then
+            while IFS=$'\t' read -r eip_id eip_name; do
+              if [ ! -z "$eip_id" ]; then
+                ((TOTAL_COUNT["EIP"]++))
+                echo "   Releasing EIP: $eip_name ($eip_id)"
+                if aws ec2 release-address --allocation-id $eip_id; then
+                  ((CLEANED_COUNT["EIP"]++))
+                  echo "   ✅ Successfully released EIP: $eip_name"
+                else
+                  echo "   ⚠️ Failed to release EIP: $eip_name"
+                fi
+                sleep 2
               fi
-              sleep 2
-            fi
-          done          
+            done <<< "$STAGING_EIPS"
+          else
+            echo "   No staging NAT EIPs found"
+          fi
 
           echo "🔍 Finding all VPCs with vanillatstodo tag..."
           VPC_IDS=$(aws ec2 describe-vpcs \
