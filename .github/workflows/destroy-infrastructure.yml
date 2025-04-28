@@ -125,59 +125,95 @@ jobs:
       - name: Clean Up Network Resources
         id: network_cleanup
         run: |
-          echo "🔍 Finding VPC and related resources..."
+          CLEANUP_FAILED=0
+
+          echo "🔍 Finding VPC with vanillatstodo tag..."
           VPC_ID=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Name,Values=*vanillatstodo*" \
             --query 'Vpcs[0].VpcId' \
             --output text)
 
           if [ "$VPC_ID" != "None" ] && [ ! -z "$VPC_ID" ]; then
-            # Track cleanup status
-            ENDPOINTS_STATUS="✅"
-            NAT_STATUS="✅"
-            ROUTE_STATUS="✅"
-            NACL_STATUS="✅"
-            SUBNET_STATUS="✅"
-            IGW_STATUS="✅"
-            VPC_STATUS="✅"
+            # Debug VPC Dependencies
+            echo "📋 Checking VPC dependencies..."
+            echo "VPC Endpoints:"
+            aws ec2 describe-vpc-endpoints \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'VpcEndpoints[*].[VpcEndpointId,State]' \
+              --output table
 
-            # 1. VPC Endpoints Cleanup
-            echo "🔍 Finding VPC Endpoints..."
+            echo "NAT Gateways:"
+            aws ec2 describe-nat-gateways \
+              --filter "Name=vpc-id,Values=$VPC_ID" \
+              --query 'NatGateways[*].[NatGatewayId,State]' \
+              --output table
+
+            # 1. VPC Endpoints
+            echo "🗑️ Cleaning up VPC Endpoints..."
             ENDPOINTS=$(aws ec2 describe-vpc-endpoints \
               --filters "Name=vpc-id,Values=$VPC_ID" \
               --query 'VpcEndpoints[*].VpcEndpointId' \
               --output text)
             
             for endpoint in $ENDPOINTS; do
+              echo "   Deleting endpoint: $endpoint"
               if ! aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $endpoint; then
-                ENDPOINTS_STATUS="❌"
+                CLEANUP_FAILED=1
+                echo "⚠️ Failed to delete endpoint: $endpoint"
+              fi
+              sleep 5
+            done
+
+            # 2. NAT Gateways
+            echo "🗑️ Cleaning up NAT Gateways..."
+            NAT_IDS=$(aws ec2 describe-nat-gateways \
+              --filter "Name=vpc-id,Values=$VPC_ID" \
+              --query 'NatGateways[*].NatGatewayId' \
+              --output text)
+            
+            for nat in $NAT_IDS; do
+              echo "   Deleting NAT Gateway: $nat"
+              if ! aws ec2 delete-nat-gateway --nat-gateway-id $nat; then
+                CLEANUP_FAILED=1
+                echo "⚠️ Failed to delete NAT Gateway: $nat"
+              fi
+            done
+            
+            echo "⏳ Waiting for NAT Gateways to be deleted..."
+            sleep 30
+
+            # 3. Network Interfaces
+            echo "🗑️ Cleaning up Network Interfaces..."
+            ENI_IDS=$(aws ec2 describe-network-interfaces \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'NetworkInterfaces[*].NetworkInterfaceId' \
+              --output text)
+            
+            for eni in $ENI_IDS; do
+              echo "   Deleting Network Interface: $eni"
+              if ! aws ec2 delete-network-interface --network-interface-id $eni; then
+                CLEANUP_FAILED=1
+                echo "⚠️ Failed to delete Network Interface: $eni"
               fi
             done
 
-            # 2. NAT Gateway & EIP Cleanup
-            echo "🔍 Finding NAT Gateways..."
-            NAT_GATEWAYS=$(aws ec2 describe-nat-gateways \
-              --filter "Name=vpc-id,Values=$VPC_ID" \
-              --query 'NatGateways[*].[NatGatewayId,NatGatewayAddresses[0].AllocationId]' \
+            # 4. Security Groups (except default)
+            echo "🗑️ Cleaning up Security Groups..."
+            SG_IDS=$(aws ec2 describe-security-groups \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'SecurityGroups[?GroupName!=`default`].GroupId' \
               --output text)
             
-            while IFS=$'\t' read -r nat_id eip_id; do
-              if [ ! -z "$nat_id" ]; then
-                if ! aws ec2 delete-nat-gateway --nat-gateway-id $nat_id; then
-                  NAT_STATUS="❌"
-                fi
-                aws ec2 wait nat-gateway-deleted --nat-gateway-ids $nat_id
-                
-                if [ ! -z "$eip_id" ]; then
-                  if ! aws ec2 release-address --allocation-id $eip_id; then
-                    NAT_STATUS="❌"
-                  fi
-                fi
+            for sg in $SG_IDS; do
+              echo "   Deleting Security Group: $sg"
+              if ! aws ec2 delete-security-group --group-id $sg; then
+                CLEANUP_FAILED=1
+                echo "⚠️ Failed to delete Security Group: $sg"
               fi
-            done <<< "$NAT_GATEWAYS"
+            done
 
-            # 3. Route Tables Cleanup
-            echo "🔍 Finding Route Tables..."
+            # 5. Route Tables (non-main)
+            echo "🗑️ Cleaning up Route Tables..."
             RT_IDS=$(aws ec2 describe-route-tables \
               --filters "Name=vpc-id,Values=$VPC_ID" \
               --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' \
@@ -190,89 +226,79 @@ jobs:
                 --output text)
               
               for assoc in $ASSOC_IDS; do
+                echo "   Disassociating route table: $assoc"
                 if ! aws ec2 disassociate-route-table --association-id $assoc; then
-                  ROUTE_STATUS="❌"
+                  CLEANUP_FAILED=1
+                  echo "⚠️ Failed to disassociate route table: $assoc"
                 fi
               done
               
+              echo "   Deleting route table: $rt"
               if ! aws ec2 delete-route-table --route-table-id $rt; then
-                ROUTE_STATUS="❌"
+                CLEANUP_FAILED=1
+                echo "⚠️ Failed to delete route table: $rt"
               fi
             done
 
-            # 4. Network ACLs Cleanup
-            echo "🔍 Finding Network ACLs..."
+            # 6. Network ACLs (non-default)
+            echo "🗑️ Cleaning up Network ACLs..."
             NACL_IDS=$(aws ec2 describe-network-acls \
               --filters "Name=vpc-id,Values=$VPC_ID" \
               --query 'NetworkAcls[?!IsDefault].NetworkAclId' \
               --output text)
             
             for nacl in $NACL_IDS; do
+              echo "   Deleting Network ACL: $nacl"
               if ! aws ec2 delete-network-acl --network-acl-id $nacl; then
-                NACL_STATUS="❌"
+                CLEANUP_FAILED=1
+                echo "⚠️ Failed to delete Network ACL: $nacl"
               fi
             done
 
-            # 5. Subnets & IGW Cleanup
-            echo "🔍 Finding Subnets..."
+            # 7. Subnets
+            echo "🗑️ Cleaning up Subnets..."
             SUBNET_IDS=$(aws ec2 describe-subnets \
               --filters "Name=vpc-id,Values=$VPC_ID" \
               --query 'Subnets[*].SubnetId' \
               --output text)
             
             for subnet in $SUBNET_IDS; do
+              echo "   Deleting subnet: $subnet"
               if ! aws ec2 delete-subnet --subnet-id $subnet; then
-                SUBNET_STATUS="❌"
+                CLEANUP_FAILED=1
+                echo "⚠️ Failed to delete subnet: $subnet"
               fi
             done
 
-            # Internet Gateway Cleanup
-            echo "🔍 Finding Internet Gateway..."
+            # 8. Internet Gateway
+            echo "🗑️ Cleaning up Internet Gateway..."
             IGW_ID=$(aws ec2 describe-internet-gateways \
               --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
               --query 'InternetGateways[*].InternetGatewayId' \
               --output text)
             
             if [ ! -z "$IGW_ID" ] && [ "$IGW_ID" != "None" ]; then
-              echo "🗑️ Detaching and deleting IGW: $IGW_ID"
+              echo "   Detaching and deleting IGW: $IGW_ID"
               if ! aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID || \
                  ! aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID; then
-                IGW_STATUS="❌"
+                CLEANUP_FAILED=1
                 echo "⚠️ Failed to cleanup IGW: $IGW_ID"
-              else
-                echo "✅ Successfully deleted IGW: $IGW_ID"
               fi
-            else
-              echo "ℹ️ No Internet Gateway found for VPC: $VPC_ID"
             fi
 
-            # Final VPC Cleanup
-            echo "🔍 Deleting VPC..."
+            # 9. Finally Delete VPC
+            echo "🗑️ Deleting VPC: $VPC_ID"
             if ! aws ec2 delete-vpc --vpc-id $VPC_ID; then
-              VPC_STATUS="❌"
+              CLEANUP_FAILED=1
+              echo "⚠️ Failed to delete VPC: $VPC_ID"
             fi
 
-            # Update GitHub Environment Variables
-            {
-              echo "NETWORK_ENDPOINTS_STATUS=$ENDPOINTS_STATUS"
-              echo "NETWORK_NAT_STATUS=$NAT_STATUS"
-              echo "NETWORK_ROUTE_STATUS=$ROUTE_STATUS"
-              echo "NETWORK_NACL_STATUS=$NACL_STATUS"
-              echo "NETWORK_SUBNET_STATUS=$SUBNET_STATUS"
-              echo "NETWORK_IGW_STATUS=$IGW_STATUS"
-              echo "NETWORK_VPC_STATUS=$VPC_STATUS"
-            } >> $GITHUB_ENV
-
-            # Overall Network Status
-            if [ "$ENDPOINTS_STATUS" = "✅" ] && \
-               [ "$NAT_STATUS" = "✅" ] && \
-               [ "$ROUTE_STATUS" = "✅" ] && \
-               [ "$NACL_STATUS" = "✅" ] && \
-               [ "$SUBNET_STATUS" = "✅" ] && \
-               [ "$IGW_STATUS" = "✅" ] && \
-               [ "$VPC_STATUS" = "✅" ]; then
+            # Set final status
+            if [ $CLEANUP_FAILED -eq 0 ]; then
+              echo "✅ Network cleanup completed successfully"
               echo "NETWORK_STATUS=✅" >> $GITHUB_ENV
             else
+              echo "⚠️ Network cleanup completed with errors"
               echo "NETWORK_STATUS=❌" >> $GITHUB_ENV
             fi
           else
