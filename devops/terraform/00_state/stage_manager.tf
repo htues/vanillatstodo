@@ -1,3 +1,15 @@
+# Local variables
+locals {
+  bucket_name = "${var.project_name}-terraform-state"
+  
+  common_tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+    Layer       = "state"
+  }
+}
+
 # Main state bucket
 resource "aws_s3_bucket" "terraform_state" {
   bucket = local.bucket_name
@@ -6,12 +18,9 @@ resource "aws_s3_bucket" "terraform_state" {
     prevent_destroy = true
   }
 
-  tags = {
-    Name        = "${var.environment}-terraform-state"
-    Environment = var.environment
-    Layer       = "state"
-    ManagedBy   = "terraform"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-terraform-state"
+  })
 }
 
 # Enable versioning

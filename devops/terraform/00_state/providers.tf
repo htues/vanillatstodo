@@ -14,9 +14,10 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Environment = var.environment
       Project     = var.project_name
+      Environment = var.environment
       ManagedBy   = "terraform"
+      Layer       = "state"
     }
   }
 }

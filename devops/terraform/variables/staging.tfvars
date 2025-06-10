@@ -1,5 +1,6 @@
 aws_region   = "us-east-2"
 environment  = "staging"
+project_name = "vanillatstodo"
 cluster_name = "vanillatstodo-cluster"
 vpc_cidr     = "10.0.0.0/16"
 
@@ -14,9 +15,3 @@ private_subnet_cidrs = {
 }
 
 vpc_flow_log_retention = 30
-
-tags = {
-  Project     = "vanillatstodo"
-  ManagedBy   = "terraform"
-  Environment = "staging"
-}

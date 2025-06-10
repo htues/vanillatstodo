@@ -10,9 +10,14 @@ variable "environment" {
 }
 
 variable "project_name" {
-  description = "Project identifier"
+  description = "Name of the project, used for resource naming and tagging"
   type        = string
   default     = "vanillatstodo"
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]+$", var.project_name))
+    error_message = "Project name must contain only lowercase letters, numbers, and hyphens."
+  }
 }
 
 variable "aws_region" {
