@@ -14,9 +14,10 @@ provider "aws" {
 
   default_tags {
     tags = {
+      Project     = var.project_name
       Environment = var.environment
-      Project     = "vanillatstodo"
       ManagedBy   = "terraform"
+      Layer       = "eks"
       Version     = "1.10+"
     }
   }
