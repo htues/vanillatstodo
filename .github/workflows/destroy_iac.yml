@@ -7,6 +7,14 @@ name: "Destroy Infrastructure"
         description: "Type 'destroy' to confirm"
         required: true
         type: string
+      environment:
+        description: "Environment to destroy (staging/production)"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: "staging"
 
 permissions:
   contents: read
@@ -18,6 +26,7 @@ env:
   AWS_REGION: "us-east-2"
   TF_VERSION: "1.10.0"
   PROJECT_NAME: "vanillatstodo"
+  ENVIRONMENT: ${{ github.event.inputs.environment }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,41 +58,48 @@ jobs:
       - name: Destroy EKS Resources
         id: eks_cleanup
         run: |
-          # Check if cluster exists first
-          echo "🔍 Checking if EKS cluster exists..."
-          if aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} >/dev/null 2>&1; then
-            echo "✅ Found EKS cluster: ${{ env.CLUSTER_NAME }}"
+          cd terraform/02_eks
+          terraform init \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
+            -backend-config="encrypt=true"
+          terraform destroy -auto-approve \
+            -var="cluster_name=${{ env.CLUSTER_NAME }}" \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
 
-            # Add required EKS permissions
-            aws iam attach-role-policy \
-              --role-name vanillatstodo-deployer \
-              --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy || \
-              echo "⚠️ Could not attach EKS policy - continuing anyway"
+      - name: Destroy Network Resources
+        id: network_cleanup
+        run: |
+          cd terraform/01_network
+          terraform init \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
+            -backend-config="encrypt=true"
+          terraform destroy -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
 
-            echo "🔍 Checking for EKS node groups..."
-            NODE_GROUPS=$(aws eks list-nodegroups --cluster-name ${{ env.CLUSTER_NAME }} --query 'nodegroups[*]' --output text || echo "")
-
-            if [ ! -z "$NODE_GROUPS" ]; then
-              echo "Found node groups: $NODE_GROUPS"
-              for ng in $NODE_GROUPS; do
-                echo "🗑️ Deleting node group: $ng"
-                aws eks delete-nodegroup --cluster-name ${{ env.CLUSTER_NAME }} --nodegroup-name $ng
-                echo "⏳ Waiting for node group deletion..."
-                aws eks wait nodegroup-deleted --cluster-name ${{ env.CLUSTER_NAME }} --nodegroup-name $ng
-              done
-            fi
-
-            echo "🗑️ Deleting EKS cluster..."
-            if aws eks delete-cluster --name ${{ env.CLUSTER_NAME }}; then
-              echo "EKS_STATUS=✅" >> $GITHUB_ENV
-              aws eks wait cluster-deleted --name ${{ env.CLUSTER_NAME }}
-            else
-              echo "EKS_STATUS=❌" >> $GITHUB_ENV
-            fi
-          else
-            echo "ℹ️ EKS cluster does not exist, skipping..."
-            echo "EKS_STATUS=✅" >> $GITHUB_ENV
-          fi
+      - name: Destroy Monitoring Resources
+        id: monitoring_cleanup
+        run: |
+          cd terraform/03_monitoring
+          terraform init \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
+            -backend-config="encrypt=true"
+          terraform destroy -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
 
       - name: Clean Up CloudWatch Resources
         id: cloudwatch_cleanup
@@ -91,36 +107,17 @@ jobs:
           echo "🔍 Finding CloudWatch resources..."
 
           # Delete CloudWatch Dashboard
-          echo "🔍 Finding CloudWatch Dashboards..."
-          DASHBOARD_NAME="staging-vanillatstodo-cluster-dashboard"
-          aws cloudwatch delete-dashboards \
-            --dashboard-names "$DASHBOARD_NAME" || true
+          echo "🗑️ Deleting CloudWatch Dashboard..."
+          aws cloudwatch delete-dashboards --dashboard-names "vanillatstodo-dashboard" || true
 
           # Delete CloudWatch Alarms
-          echo "🔍 Finding CloudWatch Alarms..."
-          aws cloudwatch describe-alarms \
-            --alarm-name-prefix "staging-vanillatstodo-cluster" \
-            --query 'MetricAlarms[*].AlarmName' \
-            --output text | while read -r alarm; do
-            if [ ! -z "$alarm" ]; then
-              echo "🗑️ Deleting alarm: $alarm"
-              aws cloudwatch delete-alarms --alarm-names "$alarm"
-            fi
-          done
-
-          # Delete CloudWatch Log Groups
-          echo "🔍 Finding CloudWatch Log Groups..."
-          aws logs describe-log-groups \
-            --log-group-name-prefix "/aws/eks/vanillatstodo-cluster" \
-            --query 'logGroups[*].logGroupName' \
-            --output text | while read -r log_group; do
-            if [ ! -z "$log_group" ]; then
-              echo "🗑️ Deleting log group: $log_group"
-              aws logs delete-log-group --log-group-name "$log_group"
-            fi
-          done
-
-          echo "CLOUDWATCH_STATUS=✅" >> $GITHUB_ENV
+          echo "🗑️ Deleting CloudWatch Alarms..."
+          ALARMS=$(aws cloudwatch describe-alarms --query "MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')].AlarmName" --output text)
+          if [ ! -z "$ALARMS" ]; then
+            for alarm in $ALARMS; do
+              aws cloudwatch delete-alarms --alarm-names $alarm
+            done
+          fi
 
       - name: Clean Up Network Resources
         id: network_cleanup
@@ -362,63 +359,48 @@ jobs:
       - name: Clean Up S3 Resources
         id: s3_cleanup
         run: |
-          echo "🔍 Checking S3 bucket: ${{ env.BUCKET_NAME }}"
-          if aws s3api head-bucket --bucket ${{ env.BUCKET_NAME }} 2>/dev/null; then
-            echo "📦 Found bucket: ${{ env.BUCKET_NAME }}"
-            
-            # List and delete all versions
-            echo "🗑️ Deleting all object versions..."
-            aws s3api list-object-versions \
-              --bucket ${{ env.BUCKET_NAME }} \
-              --output json | \
-            jq -r '.Versions[]? | "\(.Key)\t\(.VersionId)"' | \
-            while IFS=$'\t' read -r key version; do
-              echo "Deleting key: $key version: $version"
-              aws s3api delete-object \
-                --bucket ${{ env.BUCKET_NAME }} \
-                --key "$key" \
-                --version-id "$version"
+          echo "🔍 Finding S3 resources..."
+
+          # List and delete S3 buckets with our tags
+          BUCKETS=$(aws s3api list-buckets --query "Buckets[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')].Name" --output text)
+          if [ ! -z "$BUCKETS" ]; then
+            for bucket in $BUCKETS; do
+              echo "🗑️ Deleting S3 bucket: $bucket"
+              aws s3 rb s3://$bucket --force
             done
+          fi
 
-            # Delete delete markers
-            echo "🗑️ Cleaning up delete markers..."
-            aws s3api list-object-versions \
-              --bucket ${{ env.BUCKET_NAME }} \
-              --output json | \
-            jq -r '.DeleteMarkers[]? | "\(.Key)\t\(.VersionId)"' | \
-            while IFS=$'\t' read -r key version; do
-              echo "Removing delete marker: $key version: $version"
-              aws s3api delete-object \
-                --bucket ${{ env.BUCKET_NAME }} \
-                --key "$key" \
-                --version-id "$version"
+      - name: Clean Up IAM Resources
+        id: iam_cleanup
+        run: |
+          echo "🔍 Finding IAM resources..."
+
+          # Delete IAM roles with our tags
+          ROLES=$(aws iam list-roles --query "Roles[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')].RoleName" --output text)
+          if [ ! -z "$ROLES" ]; then
+            for role in $ROLES; do
+              echo "🗑️ Deleting IAM role: $role"
+              # Detach all policies first
+              POLICIES=$(aws iam list-attached-role-policies --role-name $role --query "AttachedPolicies[].PolicyArn" --output text)
+              for policy in $POLICIES; do
+                aws iam detach-role-policy --role-name $role --policy-arn $policy
+              done
+              aws iam delete-role --role-name $role
             done
+          fi
 
-            # Final verification and bucket deletion
-            echo "🔍 Verifying bucket is empty..."
-            sleep 5
-            
-            REMAINING=$(aws s3api list-object-versions \
-              --bucket ${{ env.BUCKET_NAME }} \
-              --output json | \
-              jq '.Versions + .DeleteMarkers | length')
+      - name: Clean Up VPC Resources
+        id: vpc_cleanup
+        run: |
+          echo "🔍 Finding VPC resources..."
 
-            if [ "$REMAINING" = "0" ]; then
-              echo "🗑️ Deleting empty bucket..."
-              if aws s3api delete-bucket --bucket ${{ env.BUCKET_NAME }}; then
-                echo "✅ S3 bucket deleted successfully"
-                echo "S3_STATUS=✅" >> $GITHUB_ENV
-              else
-                echo "❌ Failed to delete bucket"
-                echo "S3_STATUS=❌" >> $GITHUB_ENV
-              fi
-            else
-              echo "⚠️ Bucket still contains objects"
-              echo "S3_STATUS=❌" >> $GITHUB_ENV
-            fi
-          else
-            echo "ℹ️ Bucket not found or already deleted"
-            echo "S3_STATUS=✅" >> $GITHUB_ENV
+          # List and delete VPCs with our tags
+          VPCS=$(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" --query "Vpcs[].VpcId" --output text)
+          if [ ! -z "$VPCS" ]; then
+            for vpc in $VPCS; do
+              echo "🗑️ Deleting VPC: $vpc"
+              aws ec2 delete-vpc --vpc-id $vpc
+            done
           fi
 
       - name: Summarize Cleanup Status
