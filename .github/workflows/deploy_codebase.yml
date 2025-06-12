@@ -1,81 +1,111 @@
-name: Deploy Codebase to EKS
+name: "Deploy Codebase"
 
-on:
-  workflow_call:
+"on":
+  workflow_dispatch:
     inputs:
-      cluster_name:
-        required: true
-        type: string
-      cluster_endpoint:
-        required: true
-        type: string
       environment:
+        description: "Environment to deploy (staging/production)"
         required: true
-        type: string
-    outputs:
-      deployment_status:
-        value: ${{ jobs.trigger.outputs.status }}
+        type: choice
+        options:
+          - staging
+          - production
+        default: "staging"
 
 permissions:
   contents: read
-  deployments: write
-  repository-projects: write
+  id-token: write
+
+env:
+  CLUSTER_NAME: "vanillatstodo-cluster"
+  AWS_REGION: "us-east-2"
+  PROJECT_NAME: "vanillatstodo"
+  ENVIRONMENT: ${{ github.event.inputs.environment }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  trigger:
+  deploy:
+    name: "Deploy Application"
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    outputs:
-      status: ${{ steps.trigger_status.outputs.result }}
+    environment: ${{ github.event.inputs.environment }}
 
     steps:
-      - name: Load Environment Variables
-        run: |
-          cat .github/variables/environment.env >> $GITHUB_ENV
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Generate Timestamp
-        id: timestamp
-        run: echo "value=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ env.ENVIRONMENT }}-vanillatstodo-deployer
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Verify Cluster Details
+      - name: Update kubeconfig
         run: |
-          if [ -z "${{ inputs.cluster_endpoint }}" ]; then
-            echo "❌ Missing cluster endpoint"
+          aws eks update-kubeconfig \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Verify Cluster Access
+        run: |
+          if ! kubectl cluster-info; then
+            echo "❌ Failed to access EKS cluster"
             exit 1
           fi
-          echo "✅ Cluster details verified"
+          echo "✅ Successfully connected to EKS cluster"
 
-      - name: Trigger App Deployment
-        id: trigger_deployment
-        uses: peter-evans/repository-dispatch@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          event-type: start-eks-deployment
-          client-payload: |
-            {
-                "cluster_name": "${{ inputs.cluster_name }}",
-                "cluster_endpoint": "${{ inputs.cluster_endpoint }}",
-                "environment": "${{ inputs.environment }}",
-                "triggered_by": "infrastructure-deployment",
-                "timestamp": "${{ steps.timestamp.outputs.value }}"
-            }
-
-      - name: Set Trigger Status
-        id: trigger_status
+      - name: Deploy Application
         run: |
-          if [ "${{ steps.trigger_deployment.outcome }}" == "success" ]; then
-            echo "result=success" >> $GITHUB_OUTPUT
+          echo "🔧 Deploying application to ${{ env.ENVIRONMENT }} environment..."
+          
+          # Create namespace if it doesn't exist
+          kubectl create namespace ${{ env.ENVIRONMENT }} --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Apply Kubernetes manifests
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/configmap.yaml
+          kubectl apply -f k8s/secrets.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
+          
+          # Wait for deployment to be ready
+          echo "⏳ Waiting for deployment to be ready..."
+          kubectl rollout status deployment/vanillatstodo -n ${{ env.ENVIRONMENT }} --timeout=300s
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Deployment successful"
           else
-            echo "result=failure" >> $GITHUB_OUTPUT
+            echo "❌ Deployment failed"
+            exit 1
           fi
 
-      - name: Verify Trigger
-        if: always()
+      - name: Verify Deployment
         run: |
-          echo "### App Deployment Trigger Status 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "| ------ | ----- |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cluster | ${{ inputs.cluster_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Endpoint | ${{ inputs.cluster_endpoint }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | ${{ steps.trigger_status.outputs.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "🔍 Verifying deployment..."
+          
+          # Check deployment status
+          DEPLOYMENT_STATUS=$(kubectl get deployment vanillatstodo -n ${{ env.ENVIRONMENT }} -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+          if [ "$DEPLOYMENT_STATUS" != "True" ]; then
+            echo "❌ Deployment not available"
+            exit 1
+          fi
+          
+          # Check pod status
+          POD_COUNT=$(kubectl get pods -n ${{ env.ENVIRONMENT }} -l app=vanillatstodo -o jsonpath='{.items[*].status.phase}' | tr ' ' '\n' | grep -c "Running")
+          if [ "$POD_COUNT" -eq 0 ]; then
+            echo "❌ No running pods found"
+            exit 1
+          fi
+          
+          echo "✅ Deployment verified:"
+          echo "- Available: $DEPLOYMENT_STATUS"
+          echo "- Running pods: $POD_COUNT"
+          
+          # Get service endpoint
+          SERVICE_ENDPOINT=$(kubectl get service vanillatstodo -n ${{ env.ENVIRONMENT }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          if [ ! -z "$SERVICE_ENDPOINT" ]; then
+            echo "🌐 Service endpoint: $SERVICE_ENDPOINT"
+          fi
