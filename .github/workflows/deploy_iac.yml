@@ -1,23 +1,32 @@
-name: Deploy Infrastructure as Code
+name: "Deploy Infrastructure"
 
-on:
-  workflow_call:
+"on":
+  workflow_dispatch:
     inputs:
       environment:
+        description: "Environment to deploy (staging/production)"
         required: true
-        type: string
-    outputs:
-      cluster_status:
-        value: ${{ jobs.deploy.outputs.cluster_status }}
-      cluster_endpoint:
-        value: ${{ jobs.deploy.outputs.cluster_endpoint }}
-      cluster_name:
-        value: ${{ jobs.deploy.outputs.cluster_name }}
+        type: choice
+        options:
+          - staging
+          - production
+        default: "staging"
 
 permissions:
-  id-token: write
   contents: read
-  deployments: write
+  id-token: write
+
+env:
+  CLUSTER_NAME: "vanillatstodo-cluster"
+  BUCKET_NAME: "vanillatstodo-terraform-state"
+  AWS_REGION: "us-east-2"
+  TF_VERSION: "1.10.0"
+  PROJECT_NAME: "vanillatstodo"
+  ENVIRONMENT: ${{ github.event.inputs.environment }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -54,167 +63,160 @@ jobs:
           fi
           echo "✅ Region validated: ${{ env.AWS_REGION }}"
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
 
-      - name: Test IAM Permissions
+      - name: Terraform Init
         run: |
-          chmod +x ./devops/scripts/test_aws_permit.sh
-          ./devops/scripts/test_aws_permit.sh
-
-      - name: Setup Infrastructure Prerequisites
-        run: |
-          chmod +x ./devops/scripts/infra-manager.sh        
-          ./devops/scripts/infra-manager.sh verify
-
-      - name: Deploy State Resources
-        working-directory: devops/terraform/00_state
-        run: |
-          rm -rf .terraform*
-          terraform init
-
-          if ! aws s3 ls "s3://${PROJECT_NAME}-terraform-state" 2>/dev/null; then
-            echo "🏗️ Creating state bucket..."
-            terraform apply -auto-approve
-            echo "STATE_STATUS=✅" >> $GITHUB_ENV
-          else
-            echo "✅ State bucket exists"
-            echo "STATE_STATUS=✅" >> $GITHUB_ENV
-          fi
-
-      - name: Deploy Network Layer
-        working-directory: devops/terraform/01_network
-        run: |
-          echo "🔧 Deploying network layer..."
-
-          # Initialize backend
           terraform init \
-            -backend-config="bucket=${PROJECT_NAME}-terraform-state" \
-            -backend-config="key=staging/network.tfstate" \
-            -backend-config="region=${AWS_REGION}" \
-            -backend-config="encrypt=true"
-
-          # Plan and apply
-          terraform plan -out=tfplan
-          terraform apply tfplan
-
-          # Get state location
-          STATE_FILE=$(terraform workspace show)
-          if [ -f ".terraform/terraform.tfstate" ]; then
-            STATE_PATH=".terraform/terraform.tfstate"
-          elif [ -f "terraform.tfstate" ]; then
-            STATE_PATH="terraform.tfstate"
-          else
-            echo "❌ Cannot find state file"
-            exit 1
-          fi
-
-          # Upload state to S3
-          echo "📤 Uploading state to S3..."
-          aws s3 cp "${STATE_PATH}" "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"
-
-          if [ $? -eq 0 ]; then
-            echo "✅ State uploaded successfully"
-            
-            # Verify state file in S3
-            if aws s3 ls "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate"; then
-              echo "✅ State file verified in S3"
-            else
-              echo "❌ State file not found in S3 after upload"
-              exit 1
-            fi
-          else
-            echo "❌ Failed to upload state"
-            exit 1
-          fi
-
-      - name: Deploy EKS Layer
-        working-directory: devops/terraform/02_eks
-        run: |
-          echo "🔧 Deploying EKS layer..."
-
-          # Clean previous state
-          rm -rf .terraform*
-
-          # Download and verify network state
-          aws s3 cp "s3://${PROJECT_NAME}-terraform-state/staging/network.tfstate" ./network.tfstate
-
-          # Show network state for debugging
-          echo "📊 Network state content:"
-          cat network.tfstate | jq '.outputs'
-
-          # Initialize terraform
-          terraform init \
-            -backend-config="bucket=${PROJECT_NAME}-terraform-state" \
-            -backend-config="key=staging/eks.tfstate" \
-            -backend-config="region=${AWS_REGION}" \
-            -backend-config="encrypt=true"
-
-          # Test remote state data
-          echo "🔍 Testing remote state access:"
-          terraform console <<EOF
-          data.terraform_remote_state.network.outputs
-          EOF
-
-          # Deploy if state is accessible
-          terraform plan -out=tfplan
-          terraform apply tfplan
-
-      - name: Deploy Monitoring
-        working-directory: ./devops/terraform/03_monitoring
-        run: |
-          echo "🔍 Checking for existing log group..."
-          MONITORING_STATUS="❌"
-
-          # Initialize Terraform
-          terraform init \
-            -backend-config="bucket=vanillatstodo-terraform-state" \
-            -backend-config="key=staging/monitoring.tfstate" \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
             -backend-config="encrypt=true"
 
-          # Check and import log group if exists
-          if aws logs describe-log-groups \
-            --log-group-name-prefix "/aws/eks/vanillatstodo-cluster/cluster" \
-            --query 'logGroups[0].logGroupName' \
-            --output text | grep -q "vanillatstodo-cluster"; then
-            terraform import aws_cloudwatch_log_group.eks /aws/eks/vanillatstodo-cluster/cluster || true
-          fi
+      - name: Deploy Network Resources
+        id: network
+        run: |
+          cd terraform/01_network
+          terraform init \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
+            -backend-config="encrypt=true"
+          terraform apply -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="cluster_name=${{ env.CLUSTER_NAME }}"
 
-          # Plan and apply
-          if terraform plan -detailed-exitcode -out=tfplan; then
-            if terraform apply tfplan; then
-              MONITORING_STATUS="✅"
-            fi
-          fi
+      - name: Deploy EKS Resources
+        id: eks
+        run: |
+          cd terraform/02_eks
+          terraform init \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
+            -backend-config="encrypt=true"
+          terraform apply -auto-approve \
+            -var="cluster_name=${{ env.CLUSTER_NAME }}" \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
 
-          echo "MONITORING_STATUS=${MONITORING_STATUS}" >> $GITHUB_ENV
+      - name: Deploy Monitoring Resources
+        id: monitoring
+        run: |
+          cd terraform/03_monitoring
+          terraform init \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
+            -backend-config="encrypt=true"
+          terraform apply -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
 
       - name: Verify EKS Deployment
-        if: success()
-        working-directory: ./devops/terraform/02_eks
+        id: verify_eks
         run: |
-          CLUSTER_INFO=$(aws eks describe-cluster --name vanillatstodo-cluster --region ${{ env.AWS_REGION }})
-          CLUSTER_STATUS=$(echo "$CLUSTER_INFO" | jq -r '.cluster.status')
-          CLUSTER_VERSION=$(echo "$CLUSTER_INFO" | jq -r '.cluster.version')
-
-          if [ "$CLUSTER_STATUS" != "ACTIVE" ]; then
-            echo "❌ Cluster is not active. Status: $CLUSTER_STATUS"
+          echo "🔍 Verifying EKS deployment..."
+          
+          # Wait for cluster to be active
+          echo "⏳ Waiting for cluster to be active..."
+          aws eks wait cluster-active --name ${{ env.CLUSTER_NAME }}
+          
+          # Get cluster endpoint
+          CLUSTER_ENDPOINT=$(aws eks describe-cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --query "cluster.endpoint" \
+            --output text)
+          
+          # Get cluster status
+          CLUSTER_STATUS=$(aws eks describe-cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --query "cluster.status" \
+            --output text)
+          
+          echo "CLUSTER_ENDPOINT=$CLUSTER_ENDPOINT" >> $GITHUB_ENV
+          echo "CLUSTER_STATUS=$CLUSTER_STATUS" >> $GITHUB_ENV
+          
+          if [ "$CLUSTER_STATUS" = "ACTIVE" ]; then
+            echo "✅ EKS cluster is active"
+            echo "CLUSTER_VERIFIED=true" >> $GITHUB_ENV
+          else
+            echo "❌ EKS cluster is not active"
+            echo "CLUSTER_VERIFIED=false" >> $GITHUB_ENV
             exit 1
           fi
 
-          if [ "$CLUSTER_VERSION" != "1.31" ]; then
-            echo "❌ Wrong cluster version: $CLUSTER_VERSION. Expected: 1.31"
+      - name: Verify Network Resources
+        id: verify_network
+        run: |
+          echo "🔍 Verifying network resources..."
+          
+          # Check VPC
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
+                     "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+            --query "Vpcs[0].VpcId" \
+            --output text)
+          
+          if [ "$VPC_ID" != "None" ]; then
+            echo "✅ VPC found: $VPC_ID"
+          else
+            echo "❌ VPC not found"
+            exit 1
+          fi
+          
+          # Check subnets
+          SUBNET_COUNT=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "length(Subnets)")
+          
+          if [ "$SUBNET_COUNT" -ge 4 ]; then
+            echo "✅ Found $SUBNET_COUNT subnets"
+          else
+            echo "❌ Expected at least 4 subnets, found $SUBNET_COUNT"
             exit 1
           fi
 
-          echo "✅ EKS Cluster validated:"
-          echo "- Status: $CLUSTER_STATUS"
-          echo "- Version: $CLUSTER_VERSION"
-          echo "- Region: ${{ env.AWS_REGION }}"
+      - name: Verify Monitoring Resources
+        id: verify_monitoring
+        run: |
+          echo "🔍 Verifying monitoring resources..."
+          
+          # Check CloudWatch Dashboard
+          DASHBOARD=$(aws cloudwatch get-dashboard \
+            --dashboard-name "${{ env.PROJECT_NAME }}-dashboard" \
+            --query "DashboardBody" \
+            --output text 2>/dev/null || echo "None")
+          
+          if [ "$DASHBOARD" != "None" ]; then
+            echo "✅ CloudWatch Dashboard found"
+          else
+            echo "❌ CloudWatch Dashboard not found"
+            exit 1
+          fi
+          
+          # Check CloudWatch Alarms
+          ALARM_COUNT=$(aws cloudwatch describe-alarms \
+            --query "length(MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')])" \
+            --output text)
+          
+          if [ "$ALARM_COUNT" -gt 0 ]; then
+            echo "✅ Found $ALARM_COUNT CloudWatch Alarms"
+          else
+            echo "❌ No CloudWatch Alarms found"
+            exit 1
+          fi
 
       - name: Export EKS Details
         id: eks_output
