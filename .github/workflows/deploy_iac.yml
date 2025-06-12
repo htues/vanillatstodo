@@ -8,12 +8,13 @@ name: "Deploy Infrastructure"
         required: true
         type: string
       environment:
-        description: "Environment to deploy (staging/production)"
+        description: "Environment to deploy (staging/production/experimental)"
         required: true
         type: choice
         options:
           - staging
           - production
+          - experimental
         default: "staging"
 
 permissions:
