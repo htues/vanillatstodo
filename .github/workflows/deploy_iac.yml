@@ -3,6 +3,10 @@ name: "Deploy Infrastructure"
 "on":
   workflow_dispatch:
     inputs:
+      confirmation:
+        description: "Type 'deploy' to confirm"
+        required: true
+        type: string
       environment:
         description: "Environment to deploy (staging/production)"
         required: true
