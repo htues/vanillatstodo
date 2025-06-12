@@ -1,4 +1,4 @@
-name: "Deploy Codebase"
+name: "Deploy VanillaTsTodo: IaC and Codebase"
 
 "on":
   workflow_dispatch:
