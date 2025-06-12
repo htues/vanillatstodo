@@ -1,7 +1,7 @@
 # Local variables
 locals {
   bucket_name = "${var.project_name}-terraform-state"
-  
+
   common_tags = {
     Project     = var.project_name
     Environment = var.environment
