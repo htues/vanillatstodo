@@ -121,7 +121,7 @@ jobs:
           fi
 
       - name: Clean Up Network Resources
-        id: network_cleanup
+        id: manual_network_cleanup
         run: |
           # Initialize counters and status tracking
           declare -A CLEANED_COUNT=(
