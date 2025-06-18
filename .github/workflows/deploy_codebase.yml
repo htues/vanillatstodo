@@ -10,6 +10,7 @@ name: "Deploy VanillaTsTodo: IaC and Codebase"
         options:
           - staging
           - production
+          - experimental
         default: "staging"
 
 permissions:
