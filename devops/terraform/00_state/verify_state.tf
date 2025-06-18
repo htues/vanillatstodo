@@ -1,7 +1,3 @@
-locals {
-  bucket_name = "${var.project_name}-terraform-state"
-}
-
 # State infrastructure verification output
 output "infrastructure_verification" {
   value = {

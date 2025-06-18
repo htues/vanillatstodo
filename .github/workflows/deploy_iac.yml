@@ -73,19 +73,20 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Terraform Init
+      - name: Deploy State Resources
+        id: state
         run: |
-          terraform init \
-            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
-            -backend-config="key=${{ env.ENVIRONMENT }}/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
-            -backend-config="encrypt=true"
+          cd devops/terraform/00_state
+          terraform init
+          terraform apply -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
 
       - name: Deploy Network Resources
         id: network
         run: |
-          cd terraform/01_network
+          cd devops/terraform/01_network
           terraform init \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
@@ -101,7 +102,7 @@ jobs:
       - name: Deploy EKS Resources
         id: eks
         run: |
-          cd terraform/02_eks
+          cd devops/terraform/02_eks
           terraform init \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
@@ -117,7 +118,7 @@ jobs:
       - name: Deploy Monitoring Resources
         id: monitoring
         run: |
-          cd terraform/03_monitoring
+          cd devops/terraform/03_monitoring
           terraform init \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
