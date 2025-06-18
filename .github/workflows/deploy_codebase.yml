@@ -1,0 +1,112 @@
+name: "Deploy Codebase"
+
+"on":
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy (staging/production)"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+          - experimental
+        default: "staging"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CLUSTER_NAME: "vanillatstodo-cluster"
+  AWS_REGION: "us-east-2"
+  PROJECT_NAME: "vanillatstodo"
+  ENVIRONMENT: ${{ github.event.inputs.environment }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: "Deploy Application"
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ env.ENVIRONMENT }}-vanillatstodo-deployer
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Verify Cluster Access
+        run: |
+          if ! kubectl cluster-info; then
+            echo "❌ Failed to access EKS cluster"
+            exit 1
+          fi
+          echo "✅ Successfully connected to EKS cluster"
+
+      - name: Deploy Application
+        run: |
+          echo "🔧 Deploying application to ${{ env.ENVIRONMENT }} environment..."
+          
+          # Create namespace if it doesn't exist
+          kubectl create namespace ${{ env.ENVIRONMENT }} --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Apply Kubernetes manifests
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/configmap.yaml
+          kubectl apply -f k8s/secrets.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
+          
+          # Wait for deployment to be ready
+          echo "⏳ Waiting for deployment to be ready..."
+          kubectl rollout status deployment/vanillatstodo -n ${{ env.ENVIRONMENT }} --timeout=300s
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Deployment successful"
+          else
+            echo "❌ Deployment failed"
+            exit 1
+          fi
+
+      - name: Verify Deployment
+        run: |
+          echo "🔍 Verifying deployment..."
+          
+          # Check deployment status
+          DEPLOYMENT_STATUS=$(kubectl get deployment vanillatstodo -n ${{ env.ENVIRONMENT }} -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+          if [ "$DEPLOYMENT_STATUS" != "True" ]; then
+            echo "❌ Deployment not available"
+            exit 1
+          fi
+          
+          # Check pod status
+          POD_COUNT=$(kubectl get pods -n ${{ env.ENVIRONMENT }} -l app=vanillatstodo -o jsonpath='{.items[*].status.phase}' | tr ' ' '\n' | grep -c "Running")
+          if [ "$POD_COUNT" -eq 0 ]; then
+            echo "❌ No running pods found"
+            exit 1
+          fi
+          
+          echo "✅ Deployment verified:"
+          echo "- Available: $DEPLOYMENT_STATUS"
+          echo "- Running pods: $POD_COUNT"
+          
+          # Get service endpoint
+          SERVICE_ENDPOINT=$(kubectl get service vanillatstodo -n ${{ env.ENVIRONMENT }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          if [ ! -z "$SERVICE_ENDPOINT" ]; then
+            echo "🌐 Service endpoint: $SERVICE_ENDPOINT"
+          fi

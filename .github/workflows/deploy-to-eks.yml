@@ -1,104 +1,185 @@
 name: Deploy to AWS EKS
 
 on:
+  repository_dispatch:
+    types: [start-eks-deployment]
   workflow_run:
     workflows: ["Deploy Infrastructure"]
     types:
       - completed
     branches:
       - staging
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  id-token: write
+  contents: read
+  deployments: write
+  packages: read
+
+env:
+  CLUSTER_NAME: ${{ github.event.client_payload.cluster_name || 'vanillatstodo-cluster' }}
+  AWS_REGION: "us-east-2"
+  DOCKER_IMAGE: "hftamayo/vanillatstodo:0.0.1"
+  ENVIRONMENT: ${{ github.event.client_payload.environment || github.event.inputs.environment || 'staging' }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    env:
-      TF_WORKSPACE: staging
-      TF_VAR_environment: staging    
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'repository_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    environment:
+      name: ${{ env.ENVIRONMENT }}
+      url: ${{ env.SERVICE_URL }}
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-2
+      - name: Load Environment Variables
+        run: |
+          cat .github/variables/environment.env >> $GITHUB_ENV
 
-    - name: Install kubectl
-      run: |
-        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-        chmod +x kubectl
-        sudo mv kubectl /usr/local/bin/
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Update kubeconfig
-      run: |
-        aws eks update-kubeconfig --name vanillatstodo-cluster --region us-west-2
+      - name: Save Current Deployment
+        run: |
+          if kubectl get deployment vanillatstodo &>/dev/null; then
+            echo "📦 Saving current deployment state..."
+            kubectl get deployment vanillatstodo -o yaml > previous_deployment.yaml
+          fi
 
-    - name: Create Docker Hub Secret
-      run: |
-        if kubectl get secret regcred > /dev/null 2>&1; then
-          echo "Docker Hub Secret already exists. Skipping creation."
-        else
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      - name: Verify EKS Cluster
+        run: |
+          echo "🔍 Verifying EKS cluster..."
+          if ! aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} >/dev/null 2>&1; then
+            echo "❌ EKS cluster not found!"
+            exit 1
+          fi
+          echo "✅ EKS cluster verified"
+
+          # Store cluster endpoint for later use
+          CLUSTER_ENDPOINT=${{ github.event.client_payload.cluster_endpoint || $(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.endpoint" --output text) }}
+          echo "CLUSTER_ENDPOINT=${CLUSTER_ENDPOINT}" >> $GITHUB_ENV
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Create Docker Hub Secret
+        run: |
+          echo "🔐 Setting up Docker credentials..."
           kubectl create secret docker-registry regcred \
             --docker-server=https://index.docker.io/v1/ \
             --docker-username=${{ secrets.DOCKER_HUB_USERNAME }} \
             --docker-password=${{ secrets.DOCKER_HUB_PAT }} \
-            --docker-email=${{ secrets.DOCKER_HUB_EMAIL }}
-        fi
+            --docker-email=${{ secrets.DOCKER_HUB_EMAIL }} \
+            --dry-run=client -o yaml | kubectl apply -f -
 
-    - name: Login to Docker Hub
-      run: |
-        echo ${{ secrets.DOCKER_HUB_PAT }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PAT }}
 
-    - name: Pull Docker image
-      run: |
-        docker pull hftamayo/vanillatstodo:0.0.1
-
-    - name: Deploy to EKS
-      run: |
-        kubectl apply -f k8s/vanillatstodo_deployment.yaml
-        kubectl apply -f k8s/vanillatstodo_service.yaml
-
-    - name: Wait for Deployment Rollout
-      run: |
-        kubectl rollout status deployment/vanillatstodo --timeout=10m
-
-    - name: Get Service Public IP
-      run: |
-        echo "Waiting for service to get an external IP..."
-        for i in {1..20}; do
-          EXTERNAL_IP=$(kubectl get svc vanillatstodo -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          if [ -n "$EXTERNAL_IP" ]; then
-            echo "Service is available at: $EXTERNAL_IP"
-            echo "::set-output name=external_ip::$EXTERNAL_IP"
-            break
+      - name: Verify Docker Image
+        run: |
+          echo "🔍 Verifying Docker image..."
+          if ! docker pull ${{ env.DOCKER_IMAGE }}; then
+            echo "❌ Docker image not found!"
+            exit 1
           fi
-          echo "Service external IP not available yet. Waiting..."
-          sleep 15
-        done
+          echo "✅ Docker image verified"
 
-    - name: Notify on Completion
-      if: always()
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const message = `Deployment ${context.job.status}
-          Service available at: ${process.env.EXTERNAL_IP}`;
-          
-          console.log(message);
-          
-          // Only try to create comment if running from a PR
-          if (context.payload.pull_request) {
-            await github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: message
-            });
-          }
+      - name: Deploy to EKS
+        run: |
+          echo "🚀 Deploying application..."
+          kubectl apply -f k8s/vanillatstodo_deployment.yaml
+          kubectl apply -f k8s/vanillatstodo_service.yaml
+
+      - name: Wait for Deployment
+        run: |
+          echo "⏳ Waiting for deployment rollout..."
+          if ! kubectl rollout status deployment/vanillatstodo --timeout=10m; then
+            echo "❌ Deployment failed!"
+            kubectl describe deployment/vanillatstodo
+            kubectl logs -l app=vanillatstodo --tail=100
+            exit 1
+          fi
+
+      - name: Get Service Details
+        id: service
+        run: |
+          echo "⏳ Waiting for LoadBalancer..."
+          for i in {1..20}; do
+            EXTERNAL_IP=$(kubectl get svc vanillatstodo -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            if [ -n "$EXTERNAL_IP" ]; then
+              echo "SERVICE_URL=${EXTERNAL_IP}" >> $GITHUB_ENV
+              echo "✅ Service URL: ${EXTERNAL_IP}"
+              break
+            fi
+            echo "⏳ Waiting for external IP... (${i}/20)"
+            sleep 15
+          done
+
+      - name: Verify Application Health
+        id: health_check
+        run: |
+          echo "⏳ Checking application health..."
+          for i in {1..10}; do
+            if curl -sf ${SERVICE_URL}/health; then
+              echo "✅ Application is healthy"
+              echo "health_status=healthy" >> $GITHUB_OUTPUT
+              break
+            fi
+            echo "⏳ Waiting for application to be ready... (${i}/10)"
+            sleep 30
+          done
+
+      - name: Rollback on Failure
+        if: failure() && hashFiles('previous_deployment.yaml') != ''
+        run: |
+          echo "🔄 Rolling back deployment..."
+          kubectl apply -f previous_deployment.yaml
+          kubectl rollout status deployment/vanillatstodo --timeout=5m
+
+      - name: Deployment Summary
+        if: always()
+        run: |
+          echo "### Deployment Status 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "| --------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster | ${{ job.status }} | ${{ env.CLUSTER_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ env.ENVIRONMENT }} | ${{ env.AWS_REGION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Service URL | ${{ env.SERVICE_URL || 'N/A' }} | LoadBalancer |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | ✅ | ${{ env.DOCKER_IMAGE }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster Endpoint | ${{ env.CLUSTER_ENDPOINT }} | API Server |" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Check | ${{ steps.health_check.outputs.health_status || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rollback Status | ${{ job.status == 'failure' && hashFiles('previous_deployment.yaml') != '' && 'Applied' || 'Not Required' }} |" >> $GITHUB_STEP_SUMMARY
 
     # - name: Create Route 53 Record
     #   run: |
@@ -115,4 +196,4 @@ jobs:
     #           }
     #         }
     #       }]
-    #     }'        
+    #     }'

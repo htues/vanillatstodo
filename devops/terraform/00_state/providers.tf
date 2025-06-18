@@ -17,8 +17,7 @@ provider "aws" {
       Project     = var.project_name
       Environment = var.environment
       ManagedBy   = "terraform"
-      Layer       = "eks"
-      Version     = "1.10+"
+      Layer       = "state"
     }
   }
 }

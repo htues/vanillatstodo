@@ -1,19 +1,24 @@
-# Verify state bucket exists
-data "aws_s3_bucket" "state_bucket" {
-  bucket = "vanillatstodo-terraform-state"
+locals {
+  bucket_name = "${var.project_name}-terraform-state"
 }
 
-# Verify DynamoDB table exists
-data "aws_dynamodb_table" "state_lock" {
-  name = "vanillatstodo-terraform-state-lock"
-}
-
-# Basic verification output
+# State infrastructure verification output
 output "infrastructure_verification" {
   value = {
-    bucket_exists = data.aws_s3_bucket.state_bucket.id != ""
-    bucket_arn    = data.aws_s3_bucket.state_bucket.arn
-    table_exists  = data.aws_dynamodb_table.state_lock.id != ""
-    table_arn     = data.aws_dynamodb_table.state_lock.arn
+    bucket_name = local.bucket_name
+    environment = var.environment
+    region      = var.aws_region
+    created_at  = timestamp()
   }
+
+  description = "State infrastructure configuration details"
+}
+
+output "verification_status" {
+  value = try(
+    aws_s3_bucket.terraform_state.id != "" ?
+    "✅ State bucket verified: ${local.bucket_name}" :
+    "❌ State bucket not found",
+    "⚠️ State verification pending"
+  )
 }

@@ -1,16 +1,11 @@
-variable "kubernetes_version" {
-  description = "Kubernetes version for the EKS cluster (must be supported by AWS)"
+variable "cluster_name" {
+  description = "Name of the EKS cluster"
   type        = string
-  default     = "1.31"
-
-  validation {
-    condition     = can(regex("^1\\.(2[7-9]|3[0-1])$", var.kubernetes_version))
-    error_message = "Kubernetes version must be 1.27 or higher. Version 1.31 is recommended for extended support."
-  }
+  default     = "vanillatstodo-cluster"
 }
 
 variable "environment" {
-  description = "Environment identifier for resource tagging and naming"
+  description = "Environment name"
   type        = string
   default     = "staging"
 
@@ -32,7 +27,7 @@ variable "project_name" {
 }
 
 variable "aws_region" {
-  description = "AWS region where resources will be created"
+  description = "AWS region"
   type        = string
   default     = "us-east-2"
 
@@ -42,21 +37,10 @@ variable "aws_region" {
   }
 }
 
-variable "cluster_name" {
-  description = "Name for the EKS cluster - used in resource naming and tagging"
-  type        = string
-  default     = "vanillatstodo-cluster"
-
-  validation {
-    condition     = can(regex("^[a-z0-9-]+$", var.cluster_name))
-    error_message = "Cluster name must contain only lowercase letters, numbers, and hyphens"
-  }
-}
-
 variable "log_retention_days" {
-  description = "Number of days to retain EKS cluster CloudWatch logs"
+  description = "Number of days to retain logs"
   type        = number
-  default     = 7
+  default     = 30
 
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.log_retention_days)

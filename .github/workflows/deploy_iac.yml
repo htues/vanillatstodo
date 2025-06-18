@@ -1,0 +1,234 @@
+name: "Deploy IaC Resources"
+
+"on":
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type 'deploy' to confirm"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy (staging/production/experimental)"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+          - experimental
+        default: "staging"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CLUSTER_NAME: "vanillatstodo-cluster"
+  BUCKET_NAME: "vanillatstodo-terraform-state"
+  AWS_REGION: "us-east-2"
+  TF_VERSION: "1.10.0"
+  PROJECT_NAME: "vanillatstodo"
+  ENVIRONMENT: ${{ github.event.inputs.environment }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    outputs:
+      cluster_status: ${{ env.EKS_STATUS }}
+      cluster_endpoint: ${{ steps.eks_output.outputs.cluster_endpoint }}
+      cluster_name: ${{ env.CLUSTER_NAME }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Load Environment Variables
+        run: |
+          cat .github/variables/environment.env >> $GITHUB_ENV
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate Region
+        run: |
+          # Get current region from AWS CLI configuration or environment
+          CURRENT_REGION=${AWS_DEFAULT_REGION:-$(aws configure get region)}
+          if [ "$CURRENT_REGION" != "${{ env.AWS_REGION }}" ]; then
+            echo "❌ Wrong region configured: $CURRENT_REGION. Must be ${{ env.AWS_REGION }}"
+            exit 1
+          fi
+          echo "✅ Region validated: ${{ env.AWS_REGION }}"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
+            -backend-config="encrypt=true"
+
+      - name: Deploy Network Resources
+        id: network
+        run: |
+          cd terraform/01_network
+          terraform init \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
+            -backend-config="encrypt=true"
+          terraform apply -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="cluster_name=${{ env.CLUSTER_NAME }}"
+
+      - name: Deploy EKS Resources
+        id: eks
+        run: |
+          cd terraform/02_eks
+          terraform init \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
+            -backend-config="encrypt=true"
+          terraform apply -auto-approve \
+            -var="cluster_name=${{ env.CLUSTER_NAME }}" \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
+
+      - name: Deploy Monitoring Resources
+        id: monitoring
+        run: |
+          cd terraform/03_monitoring
+          terraform init \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
+            -backend-config="encrypt=true"
+          terraform apply -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
+
+      - name: Verify EKS Deployment
+        id: verify_eks
+        run: |
+          echo "🔍 Verifying EKS deployment..."
+          
+          # Wait for cluster to be active
+          echo "⏳ Waiting for cluster to be active..."
+          aws eks wait cluster-active --name ${{ env.CLUSTER_NAME }}
+          
+          # Get cluster endpoint
+          CLUSTER_ENDPOINT=$(aws eks describe-cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --query "cluster.endpoint" \
+            --output text)
+          
+          # Get cluster status
+          CLUSTER_STATUS=$(aws eks describe-cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --query "cluster.status" \
+            --output text)
+          
+          echo "CLUSTER_ENDPOINT=$CLUSTER_ENDPOINT" >> $GITHUB_ENV
+          echo "CLUSTER_STATUS=$CLUSTER_STATUS" >> $GITHUB_ENV
+          
+          if [ "$CLUSTER_STATUS" = "ACTIVE" ]; then
+            echo "✅ EKS cluster is active"
+            echo "CLUSTER_VERIFIED=true" >> $GITHUB_ENV
+          else
+            echo "❌ EKS cluster is not active"
+            echo "CLUSTER_VERIFIED=false" >> $GITHUB_ENV
+            exit 1
+          fi
+
+      - name: Verify Network Resources
+        id: verify_network
+        run: |
+          echo "🔍 Verifying network resources..."
+          
+          # Check VPC
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
+                     "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+            --query "Vpcs[0].VpcId" \
+            --output text)
+          
+          if [ "$VPC_ID" != "None" ]; then
+            echo "✅ VPC found: $VPC_ID"
+          else
+            echo "❌ VPC not found"
+            exit 1
+          fi
+          
+          # Check subnets
+          SUBNET_COUNT=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "length(Subnets)")
+          
+          if [ "$SUBNET_COUNT" -ge 4 ]; then
+            echo "✅ Found $SUBNET_COUNT subnets"
+          else
+            echo "❌ Expected at least 4 subnets, found $SUBNET_COUNT"
+            exit 1
+          fi
+
+      - name: Verify Monitoring Resources
+        id: verify_monitoring
+        run: |
+          echo "🔍 Verifying monitoring resources..."
+          
+          # Check CloudWatch Dashboard
+          DASHBOARD=$(aws cloudwatch get-dashboard \
+            --dashboard-name "${{ env.PROJECT_NAME }}-dashboard" \
+            --query "DashboardBody" \
+            --output text 2>/dev/null || echo "None")
+          
+          if [ "$DASHBOARD" != "None" ]; then
+            echo "✅ CloudWatch Dashboard found"
+          else
+            echo "❌ CloudWatch Dashboard not found"
+            exit 1
+          fi
+          
+          # Check CloudWatch Alarms
+          ALARM_COUNT=$(aws cloudwatch describe-alarms \
+            --query "length(MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')])" \
+            --output text)
+          
+          if [ "$ALARM_COUNT" -gt 0 ]; then
+            echo "✅ Found $ALARM_COUNT CloudWatch Alarms"
+          else
+            echo "❌ No CloudWatch Alarms found"
+            exit 1
+          fi
+
+      - name: Export EKS Details
+        id: eks_output
+        if: success()
+        run: |
+          ENDPOINT=$(aws eks describe-cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --query "cluster.endpoint" \
+            --output text)
+          echo "cluster_endpoint=${ENDPOINT}" >> $GITHUB_OUTPUT
