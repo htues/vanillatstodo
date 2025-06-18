@@ -1,9 +1,9 @@
 name: "Deploy IaC and Codebase"
 
 on:
-  push:
-    branches:
-      - staging
+  # push:
+  #   branches:
+  #     - staging
   workflow_dispatch:
     inputs:
       environment:

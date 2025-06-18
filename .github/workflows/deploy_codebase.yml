@@ -65,12 +65,12 @@ jobs:
           kubectl create namespace ${{ env.ENVIRONMENT }} --dry-run=client -o yaml | kubectl apply -f -
           
           # Apply Kubernetes manifests
-          kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/configmap.yaml
-          kubectl apply -f k8s/secrets.yaml
-          kubectl apply -f k8s/deployment.yaml
-          kubectl apply -f k8s/service.yaml
-          kubectl apply -f k8s/ingress.yaml
+          kubectl apply -f devops/k8s/namespace.yaml
+          kubectl apply -f devops/k8s/configmap.yaml
+          kubectl apply -f devops/k8s/secrets.yaml
+          kubectl apply -f devops/k8s/deployment.yaml
+          kubectl apply -f devops/k8s/service.yaml
+          kubectl apply -f devops/k8s/ingress.yaml
           
           # Wait for deployment to be ready
           echo "⏳ Waiting for deployment to be ready..."
