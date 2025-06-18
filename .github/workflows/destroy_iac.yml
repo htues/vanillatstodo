@@ -58,7 +58,7 @@ jobs:
       - name: Destroy EKS Resources
         id: eks_cleanup
         run: |
-          cd terraform/02_eks
+          cd devops/terraform/02_eks
           terraform init \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
@@ -74,7 +74,7 @@ jobs:
       - name: Destroy Network Resources
         id: network_cleanup
         run: |
-          cd terraform/01_network
+          cd devops/terraform/01_network
           terraform init \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
@@ -89,7 +89,7 @@ jobs:
       - name: Destroy Monitoring Resources
         id: monitoring_cleanup
         run: |
-          cd terraform/03_monitoring
+          cd devops/terraform/03_monitoring
           terraform init \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
