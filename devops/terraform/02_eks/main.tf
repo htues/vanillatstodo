@@ -18,11 +18,18 @@ locals {
   private_subnets = data.terraform_remote_state.network.outputs.private_subnet_ids
   public_subnets  = data.terraform_remote_state.network.outputs.public_subnet_ids
   all_subnets     = concat(local.private_subnets, local.public_subnets)
+
+  common_tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+    Layer       = "eks"
+  }
 }
 
 # Security group for EKS
 resource "aws_security_group" "eks_cluster" {
-  name        = "${var.environment}-eks-cluster-sg"
+  name        = "${var.project_name}-eks-cluster-sg"
   description = "Security group for EKS cluster"
   vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
 
@@ -33,10 +40,9 @@ resource "aws_security_group" "eks_cluster" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name        = "${var.environment}-${var.cluster_name}-sg"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.cluster_name}-sg"
+  })
 }
 
 # EKS Cluster configuration
@@ -54,10 +60,8 @@ resource "aws_eks_cluster" "main" {
     security_group_ids      = [aws_security_group.eks_cluster.id]
   }
 
-  tags = {
-    Name        = "${var.environment}-${var.cluster_name}"
-    Environment = var.environment
-    ManagedBy   = "terraform"
-    Version     = "1.31"
-  }
+  tags = merge(local.common_tags, {
+    Name    = "${var.project_name}-${var.cluster_name}"
+    Version = "1.31"
+  })
 }

@@ -20,6 +20,17 @@ variable "environment" {
   }
 }
 
+variable "project_name" {
+  description = "Name of the project, used for resource naming and tagging"
+  type        = string
+  default     = "vanillatstodo"
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]+$", var.project_name))
+    error_message = "Project name must contain only lowercase letters, numbers, and hyphens."
+  }
+}
+
 variable "cluster_name" {
   description = "Name of the EKS cluster"
   type        = string
@@ -44,6 +55,11 @@ variable "public_subnet_cidrs" {
     a = "10.0.1.0/24"
     b = "10.0.2.0/24"
   }
+
+  validation {
+    condition     = alltrue([for cidr in values(var.public_subnet_cidrs) : can(cidrhost(cidr, 0))])
+    error_message = "All public subnet CIDRs must be valid IPv4 CIDR blocks."
+  }
 }
 
 variable "private_subnet_cidrs" {
@@ -53,12 +69,22 @@ variable "private_subnet_cidrs" {
     a = "10.0.3.0/24"
     b = "10.0.4.0/24"
   }
+
+  validation {
+    condition     = alltrue([for cidr in values(var.private_subnet_cidrs) : can(cidrhost(cidr, 0))])
+    error_message = "All private subnet CIDRs must be valid IPv4 CIDR blocks."
+  }
 }
 
 variable "vpc_flow_log_retention" {
   description = "Number of days to retain VPC flow logs"
   type        = number
   default     = 30
+
+  validation {
+    condition     = var.vpc_flow_log_retention >= 1 && var.vpc_flow_log_retention <= 365
+    error_message = "VPC flow log retention must be between 1 and 365 days."
+  }
 }
 
 variable "tags" {

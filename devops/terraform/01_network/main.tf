@@ -1,10 +1,19 @@
+locals {
+  common_tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+    Owner       = "vanillatstodo"
+  }
+}
+
 # Create VPC with DNS support
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
   enable_dns_support   = true
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     Name                                        = "${var.environment}-vanillatstodo-vpc"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   })
@@ -14,9 +23,9 @@ resource "aws_vpc" "main" {
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
-  tags = {
+  tags = merge(local.common_tags, {
     Name = "${var.environment}-vanillatstodo-igw"
-  }
+  })
 }
 
 # Create public subnets
@@ -27,7 +36,7 @@ resource "aws_subnet" "public_a" {
 
   map_public_ip_on_launch = true
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     Name                                        = "${var.environment}-public-a"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     "kubernetes.io/role/elb"                    = "1"
@@ -41,7 +50,7 @@ resource "aws_subnet" "public_b" {
 
   map_public_ip_on_launch = true
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     Name                                        = "${var.environment}-public-b"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     "kubernetes.io/role/elb"                    = "1"
@@ -54,7 +63,7 @@ resource "aws_subnet" "private_a" {
   cidr_block        = var.private_subnet_cidrs["a"]
   availability_zone = "${var.aws_region}a"
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     Name                                        = "${var.environment}-private-a"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     "kubernetes.io/role/internal-elb"           = "1"
@@ -66,7 +75,7 @@ resource "aws_subnet" "private_b" {
   cidr_block        = var.private_subnet_cidrs["b"]
   availability_zone = "${var.aws_region}b"
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     Name                                        = "${var.environment}-private-b"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     "kubernetes.io/role/internal-elb"           = "1"
@@ -82,10 +91,9 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.main.id
   }
 
-  tags = {
-    Name        = "${var.environment}-public"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-public"
+  })
 }
 
 # Create private route tables for NAT gateways
@@ -97,10 +105,9 @@ resource "aws_route_table" "private_a" {
     nat_gateway_id = aws_nat_gateway.nat_a.id
   }
 
-  tags = {
-    Name        = "${var.environment}-private-a"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-private-a"
+  })
   depends_on = [aws_nat_gateway.nat_a]
 }
 
@@ -112,10 +119,9 @@ resource "aws_route_table" "private_b" {
     nat_gateway_id = aws_nat_gateway.nat_b.id
   }
 
-  tags = {
-    Name        = "${var.environment}-private-b"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-private-b"
+  })
   depends_on = [aws_nat_gateway.nat_b]
 }
 
@@ -143,44 +149,40 @@ resource "aws_route_table_association" "private_b" {
 # Create NAT Gateways
 resource "aws_eip" "nat_a" {
   domain = "vpc"
-  tags = {
-    Name        = "${var.environment}-nat-a"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-nat-a"
+  })
 }
 
 resource "aws_nat_gateway" "nat_a" {
   allocation_id = aws_eip.nat_a.id
   subnet_id     = aws_subnet.public_a.id
 
-  tags = {
-    Name        = "${var.environment}-nat-a"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-nat-a"
+  })
   depends_on = [aws_internet_gateway.main]
 }
 
 resource "aws_eip" "nat_b" {
   domain = "vpc"
-  tags = {
-    Name        = "${var.environment}-nat-b"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-nat-b"
+  })
 }
 
 resource "aws_nat_gateway" "nat_b" {
   allocation_id = aws_eip.nat_b.id
   subnet_id     = aws_subnet.public_b.id
 
-  tags = {
-    Name        = "${var.environment}-nat-b"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-nat-b"
+  })
   depends_on = [aws_internet_gateway.main]
 }
 
 resource "aws_security_group" "vpc_endpoints" {
-  name_prefix = "${var.environment}-vpc-endpoints-"
+  name_prefix = "${var.project_name}-vpc-endpoints-"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -197,10 +199,9 @@ resource "aws_security_group" "vpc_endpoints" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name        = "${var.environment}-vpc-endpoints-sg"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-vpc-endpoints-sg"
+  })
 }
 
 # VPC Endpoints for EKS private access
@@ -214,10 +215,9 @@ resource "aws_vpc_endpoint" "s3" {
     aws_route_table.private_b.id
   ]
 
-  tags = {
-    Name        = "${var.environment}-s3-endpoint"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-s3-endpoint"
+  })
 }
 
 # Update ECR API endpoint
@@ -227,12 +227,11 @@ resource "aws_vpc_endpoint" "ecr_api" {
   vpc_endpoint_type   = "Interface"
   subnet_ids          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
   security_group_ids  = [aws_security_group.vpc_endpoints.id]
-  private_dns_enabled = false # Changed from true to false
+  private_dns_enabled = false
 
-  tags = {
-    Name        = "${var.environment}-ecr-api-endpoint"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-ecr-api-endpoint"
+  })
   depends_on = [aws_route_table.private_a, aws_route_table.private_b]
 }
 
@@ -243,12 +242,11 @@ resource "aws_vpc_endpoint" "ecr_dkr" {
   vpc_endpoint_type   = "Interface"
   subnet_ids          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
   security_group_ids  = [aws_security_group.vpc_endpoints.id]
-  private_dns_enabled = false # Changed from true to false
+  private_dns_enabled = false
 
-  tags = {
-    Name        = "${var.environment}-ecr-dkr-endpoint"
-    Environment = var.environment
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-ecr-dkr-endpoint"
+  })
   depends_on = [aws_route_table.private_a, aws_route_table.private_b]
 }
 

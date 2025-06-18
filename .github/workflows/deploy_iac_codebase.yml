@@ -38,7 +38,7 @@ jobs:
 
   deploy_infrastructure:
     needs: setup
-    uses: ./.github/workflows/iac.yml
+    uses: ./.github/workflows/deploy_iac.yml
     with:
       environment: ${{ inputs.environment || 'staging' }}
     secrets: inherit
@@ -46,7 +46,7 @@ jobs:
   deploy_codebase:
     needs: deploy_infrastructure
     if: needs.deploy_infrastructure.outputs.cluster_status == '✅'
-    uses: ./.github/workflows/trigger_codebase.yml
+    uses: ./.github/workflows/deploy_codebase.yml
     with:
       cluster_name: ${{ needs.deploy_infrastructure.outputs.cluster_name }}
       cluster_endpoint: ${{ needs.deploy_infrastructure.outputs.cluster_endpoint }}
