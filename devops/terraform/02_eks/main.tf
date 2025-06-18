@@ -3,15 +3,6 @@ data "aws_iam_role" "eks_cluster" {
   name = "${var.environment}-${var.cluster_name}-role"
 }
 
-data "terraform_remote_state" "network" {
-  backend = "s3"
-  config = {
-    bucket = "vanillatstodo-terraform-state"
-    key    = "staging/network.tfstate"
-    region = "us-east-2"
-  }
-}
-
 # Local variables
 locals {
   vpc_id          = data.terraform_remote_state.network.outputs.vpc_id
