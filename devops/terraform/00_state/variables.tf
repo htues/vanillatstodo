@@ -4,8 +4,8 @@ variable "environment" {
   default     = "staging"
 
   validation {
-    condition     = contains(["staging", "production"], var.environment)
-    error_message = "Environment must be either 'staging' or 'production'."
+    condition     = contains(["staging", "production", "experimental"], var.environment)
+    error_message = "Environment must be either 'staging', 'production', or 'experimental'."
   }
 }
 
