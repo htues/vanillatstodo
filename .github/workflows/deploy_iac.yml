@@ -73,14 +73,15 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Terraform Init
+      - name: Deploy State Resources
+        id: state
         run: |
-          terraform init \
-            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
-            -backend-config="key=${{ env.ENVIRONMENT }}/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
-            -backend-config="encrypt=true"
+          cd devops/terraform/00_state
+          terraform init
+          terraform apply -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
 
       - name: Deploy Network Resources
         id: network
