@@ -1,4 +1,4 @@
-name: "Destroy IaC Resources using Terraform from AWS"
+name: "Destroy IaC Resources"
 
 "on":
   workflow_dispatch:

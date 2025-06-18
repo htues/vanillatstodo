@@ -1,4 +1,4 @@
-name: Deploy infrastructure and codebase
+name: "Deploy IaC and Codebase"
 
 on:
   push:

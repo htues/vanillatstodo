@@ -1,4 +1,4 @@
-name: "Deploy IaC Resources using Terraform to AWS"
+name: "Deploy IaC Resources"
 
 "on":
   workflow_dispatch:
