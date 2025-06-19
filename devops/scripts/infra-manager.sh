@@ -34,6 +34,20 @@ verify_s3_permissions() {
     fi
 }
 
+ensure_s3_bucket_exists() {
+    BUCKET_NAME="vanillatstodo-terraform-state"
+    AWS_REGION="us-east-2"
+    log_message "Ensuring S3 bucket $BUCKET_NAME exists..."
+    if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+        log_message "✅ S3 bucket $BUCKET_NAME already exists."
+    else
+        log_message "🪣 S3 bucket $BUCKET_NAME does not exist. Creating..."
+        aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$AWS_REGION" \
+            --create-bucket-configuration LocationConstraint="$AWS_REGION"
+        log_message "✅ S3 bucket $BUCKET_NAME created."
+    fi
+}
+
 verify_prerequisites() {
     log_message "Running pre-deployment verifications..."
     
@@ -46,6 +60,8 @@ verify_prerequisites() {
         log_message "WARNING: S3 checks completed with warnings"
         # Don't exit, as bucket might not exist yet
     }
+
+    ensure_s3_bucket_exists
 
     log_message "✅ Prerequisites verification completed"
 }
