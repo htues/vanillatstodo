@@ -56,18 +56,16 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Destroy EKS Resources
-        id: eks_cleanup
+      - name: Destroy State Resources
+        id: state
         run: |
-          cd devops/terraform/02_eks
-          terraform init \
+          cd devops/terraform/00_state
+          terraform init -reconfigure \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
-            -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/state/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
             -backend-config="encrypt=true"
           terraform destroy -auto-approve \
-            -var="cluster_name=${{ env.CLUSTER_NAME }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" \
             -var="environment=${{ env.ENVIRONMENT }}"
@@ -76,13 +74,27 @@ jobs:
         id: network_cleanup
         run: |
           cd devops/terraform/01_network
-          terraform init \
+          terraform init -reconfigure \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
             -backend-config="encrypt=true"
           terraform destroy -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
+
+      - name: Destroy EKS Resources
+        id: eks_cleanup
+        run: |
+          cd devops/terraform/02_eks
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+          terraform destroy -auto-approve \
+            -var="cluster_name=${{ env.CLUSTER_NAME }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" \
             -var="environment=${{ env.ENVIRONMENT }}"
@@ -91,11 +103,10 @@ jobs:
         id: monitoring_cleanup
         run: |
           cd devops/terraform/03_monitoring
-          terraform init \
+          terraform init -reconfigure \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
             -backend-config="encrypt=true"
           terraform destroy -auto-approve \
             -var="aws_region=${{ env.AWS_REGION }}" \
