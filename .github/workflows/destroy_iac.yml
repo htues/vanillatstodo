@@ -392,32 +392,15 @@ jobs:
         run: |
           echo "🔍 Finding S3 resources..."
 
-          # List and delete S3 buckets with our tags
-          BUCKETS=$(aws s3api list-buckets --query "Buckets[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')].Name" --output text)
-          if [ ! -z "$BUCKETS" ]; then
+          # List and delete S3 buckets with our project name pattern
+          BUCKETS=$(aws s3api list-buckets --query "Buckets[?contains(Name, '${{ env.PROJECT_NAME }}')].Name" --output text)
+          if [ ! -z "$BUCKETS" ] && [ "$BUCKETS" != "None" ]; then
             for bucket in $BUCKETS; do
               echo "🗑️ Deleting S3 bucket: $bucket"
-              aws s3 rb s3://$bucket --force
+              aws s3 rb s3://$bucket --force || true
             done
-          fi
-
-      - name: Clean Up IAM Resources
-        id: iam_cleanup
-        run: |
-          echo "🔍 Finding IAM resources..."
-
-          # Delete IAM roles with our tags
-          ROLES=$(aws iam list-roles --query "Roles[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')].RoleName" --output text)
-          if [ ! -z "$ROLES" ]; then
-            for role in $ROLES; do
-              echo "🗑️ Deleting IAM role: $role"
-              # Detach all policies first
-              POLICIES=$(aws iam list-attached-role-policies --role-name $role --query "AttachedPolicies[].PolicyArn" --output text)
-              for policy in $POLICIES; do
-                aws iam detach-role-policy --role-name $role --policy-arn $policy
-              done
-              aws iam delete-role --role-name $role
-            done
+          else
+            echo "No S3 buckets found with project name pattern"
           fi
 
       - name: Clean Up VPC Resources
