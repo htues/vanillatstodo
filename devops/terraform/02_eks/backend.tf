@@ -1,9 +1,12 @@
 terraform {
+  required_version = ">= 1.10.0"
+
   backend "s3" {
-    bucket  = "vanillatstodo-terraform-state"
-    key     = "staging/eks.tfstate"
-    region  = "us-east-2"
-    encrypt = true
+    bucket         = "vanillatstodo-terraform-state"
+    key            = "experimental/eks/terraform.tfstate"
+    region         = "us-east-2"
+    encrypt        = true
+    use_lockfile   = true
   }
 }
 
