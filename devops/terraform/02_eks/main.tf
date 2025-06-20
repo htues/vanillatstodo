@@ -1,6 +1,6 @@
 # Use data source to reference existing role
 data "aws_iam_role" "eks_cluster" {
-  name = "${var.environment}-${var.cluster_name}-role"
+  name = var.cluster_role_name
 }
 
 # Local variables

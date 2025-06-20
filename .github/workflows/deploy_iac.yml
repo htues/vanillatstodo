@@ -117,6 +117,14 @@ jobs:
           echo "State file not found after waiting."
           exit 1
 
+      - name: Set Environment-Specific Role Name
+        run: |
+          if [[ "${{ env.ENVIRONMENT }}" == "production" ]]; then
+            echo "EKS_CLUSTER_ROLE=production-vanillatstodo-cluster-role" >> $GITHUB_ENV
+          else
+            echo "EKS_CLUSTER_ROLE=staging-vanillatstodo-cluster-role" >> $GITHUB_ENV
+          fi
+
       - name: Deploy EKS Resources
         id: eks
         run: |
@@ -130,7 +138,8 @@ jobs:
             -var="cluster_name=${{ env.CLUSTER_NAME }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}"
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="cluster_role_name=${{ env.EKS_CLUSTER_ROLE }}"
 
       - name: Deploy Monitoring Resources
         id: monitoring
