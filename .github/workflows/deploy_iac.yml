@@ -77,7 +77,7 @@ jobs:
         id: state
         run: |
           cd devops/terraform/00_state
-          terraform init
+          terraform init -reconfigure
           terraform apply -auto-approve \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" \
@@ -87,11 +87,10 @@ jobs:
         id: network
         run: |
           cd devops/terraform/01_network
-          terraform init \
+          terraform init -reconfigure \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
             -backend-config="encrypt=true"
           terraform apply -auto-approve \
             -var="aws_region=${{ env.AWS_REGION }}" \
@@ -103,11 +102,10 @@ jobs:
         id: eks
         run: |
           cd devops/terraform/02_eks
-          terraform init \
+          terraform init -reconfigure \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
             -backend-config="encrypt=true"
           terraform apply -auto-approve \
             -var="cluster_name=${{ env.CLUSTER_NAME }}" \
@@ -119,11 +117,10 @@ jobs:
         id: monitoring
         run: |
           cd devops/terraform/03_monitoring
-          terraform init \
+          terraform init -reconfigure \
             -backend-config="bucket=${{ env.BUCKET_NAME }}" \
             -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ env.BUCKET_NAME }}-lock" \
             -backend-config="encrypt=true"
           terraform apply -auto-approve \
             -var="aws_region=${{ env.AWS_REGION }}" \
