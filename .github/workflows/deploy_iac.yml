@@ -103,6 +103,20 @@ jobs:
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="cluster_name=${{ env.CLUSTER_NAME }}"
 
+      - name: Wait for Network State File in S3
+        run: |
+          for i in {1..10}; do
+            if aws s3api head-object --bucket ${{ env.BUCKET_NAME }} --key "${{ env.ENVIRONMENT }}/network/terraform.tfstate"; then
+              echo "State file found!"
+              exit 0
+            else
+              echo "State file not found, retrying in 5 seconds... ($i/10)"
+              sleep 5
+            fi
+          done
+          echo "State file not found after waiting."
+          exit 1
+
       - name: Deploy EKS Resources
         id: eks
         run: |
