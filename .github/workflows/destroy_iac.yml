@@ -97,7 +97,8 @@ jobs:
             -var="cluster_name=${{ env.CLUSTER_NAME }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}"
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="cluster_role_name=${{ env.ENVIRONMENT == 'production' && 'production-vanillatstodo-eks-cluster' || 'staging-vanillatstodo-eks-cluster' }}"
 
       - name: Destroy Monitoring Resources
         id: monitoring_cleanup

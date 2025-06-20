@@ -56,6 +56,7 @@ variable "cluster_name" {
 variable "cluster_role_name" {
   description = "The name of the IAM role for the EKS cluster"
   type        = string
+  default     = "staging-vanillatstodo-eks-cluster"
 }
 
 variable "log_retention_days" {
