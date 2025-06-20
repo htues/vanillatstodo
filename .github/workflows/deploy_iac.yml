@@ -47,16 +47,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Load Environment Variables
-        run: |
-          cat .github/variables/environment.env >> $GITHUB_ENV
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure S3 State Bucket Exists
+        run: |
+          chmod +x devops/scripts/infra-manager.sh
+          devops/scripts/infra-manager.sh verify
+
+      - name: Load Environment Variables
+        run: |
+          cat .github/variables/environment.env >> $GITHUB_ENV
 
       - name: Validate Region
         run: |
