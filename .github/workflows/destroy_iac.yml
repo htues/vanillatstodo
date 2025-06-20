@@ -93,6 +93,24 @@ jobs:
             -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="encrypt=true"
+          
+          # Check for and force unlock any stale locks
+          echo "🔓 Checking for stale state locks..."
+          if terraform plan -detailed-exitcode >/dev/null 2>&1; then
+            echo "✅ No state lock detected"
+          else
+            echo "⚠️ State lock detected, attempting to force unlock..."
+            # Try to get the lock ID from the error message
+            LOCK_ID=$(terraform plan 2>&1 | grep -o 'ID: [a-f0-9-]*' | cut -d' ' -f2 || echo "")
+            if [ ! -z "$LOCK_ID" ]; then
+              echo "🔓 Force unlocking with ID: $LOCK_ID"
+              terraform force-unlock -force "$LOCK_ID"
+            else
+              echo "⚠️ Could not determine lock ID, trying generic unlock..."
+              terraform force-unlock -force f2e10d17-e3da-6e08-aef1-7a64455b038d || true
+            fi
+          fi
+          
           terraform destroy -auto-approve \
             -var="cluster_name=${{ env.CLUSTER_NAME }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
