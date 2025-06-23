@@ -70,20 +70,6 @@ jobs:
             -var="project_name=${{ env.PROJECT_NAME }}" \
             -var="environment=${{ env.ENVIRONMENT }}"
 
-      - name: Destroy Network Resources
-        id: network_cleanup
-        run: |
-          cd devops/terraform/01_network
-          terraform init -reconfigure \
-            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
-            -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="encrypt=true"
-          terraform destroy -auto-approve \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}"
-
       - name: Destroy EKS Resources
         id: eks_cleanup
         run: |
@@ -127,6 +113,98 @@ jobs:
             -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="encrypt=true"
+          terraform destroy -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
+
+      - name: Wait for EKS Resources to be Fully Deleted
+        id: wait_for_eks_cleanup
+        run: |
+          echo "⏳ Waiting for EKS resources to be fully deleted..."
+          sleep 60
+          
+          # Check if there are any remaining EKS-related resources
+          echo "🔍 Checking for remaining EKS resources..."
+          
+          # Check for EKS clusters
+          CLUSTERS=$(aws eks list-clusters --query "clusters[?contains(@, '${{ env.CLUSTER_NAME }}')]" --output text)
+          if [ ! -z "$CLUSTERS" ] && [ "$CLUSTERS" != "None" ]; then
+            echo "⚠️ Found remaining EKS clusters: $CLUSTERS"
+            echo "⏳ Waiting additional 2 minutes for cluster deletion..."
+            sleep 120
+          else
+            echo "✅ No remaining EKS clusters found"
+          fi
+          
+          # Check for EKS node groups
+          NODE_GROUPS=$(aws eks list-nodegroups --cluster-name ${{ env.CLUSTER_NAME }} --query "nodegroups" --output text 2>/dev/null || echo "")
+          if [ ! -z "$NODE_GROUPS" ] && [ "$NODE_GROUPS" != "None" ]; then
+            echo "⚠️ Found remaining EKS node groups: $NODE_GROUPS"
+            echo "⏳ Waiting additional 2 minutes for node group deletion..."
+            sleep 120
+          else
+            echo "✅ No remaining EKS node groups found"
+          fi
+
+      - name: Destroy Network Resources
+        id: network_cleanup
+        run: |
+          cd devops/terraform/01_network
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+          
+          # Check for subnet dependencies before destroying
+          echo "🔍 Checking for subnet dependencies..."
+          VPC_IDS=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Name,Values=*vanillatstodo*" \
+            --query 'Vpcs[*].VpcId' \
+            --output text)
+          
+          for VPC_ID in $VPC_IDS; do
+            echo "🔍 Checking dependencies for VPC: $VPC_ID"
+            
+            # Check for EKS-related resources
+            EKS_ENDPOINTS=$(aws ec2 describe-vpc-endpoints \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=service-name,Values=com.amazonaws.*.eks" \
+              --query 'VpcEndpoints[*].VpcEndpointId' \
+              --output text)
+            
+            if [ ! -z "$EKS_ENDPOINTS" ] && [ "$EKS_ENDPOINTS" != "None" ]; then
+              echo "⚠️ Found EKS VPC endpoints: $EKS_ENDPOINTS"
+              echo "🗑️ Deleting EKS VPC endpoints..."
+              aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $EKS_ENDPOINTS
+              sleep 30
+            fi
+            
+            # Check for network interfaces that might be blocking subnet deletion
+            ENI_IDS=$(aws ec2 describe-network-interfaces \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'NetworkInterfaces[*].NetworkInterfaceId' \
+              --output text)
+            
+            if [ ! -z "$ENI_IDS" ] && [ "$ENI_IDS" != "None" ]; then
+              echo "⚠️ Found network interfaces: $ENI_IDS"
+              for eni in $ENI_IDS; do
+                ENI_STATUS=$(aws ec2 describe-network-interfaces \
+                  --network-interface-ids $eni \
+                  --query 'NetworkInterfaces[0].Status' \
+                  --output text)
+                if [ "$ENI_STATUS" = "available" ]; then
+                  echo "🗑️ Deleting available network interface: $eni"
+                  aws ec2 delete-network-interface --network-interface-id $eni
+                  sleep 5
+                else
+                  echo "⚠️ Network interface $eni is not available (status: $ENI_STATUS)"
+                fi
+              done
+            fi
+          done
+          
+          echo "🚀 Proceeding with network destruction..."
           terraform destroy -auto-approve \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" \
