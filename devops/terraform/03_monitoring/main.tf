@@ -25,5 +25,6 @@ resource "aws_cloudwatch_log_group" "eks" {
   # Prevent recreation of existing log group
   lifecycle {
     prevent_destroy = true
+    ignore_changes  = [name]
   }
 }
