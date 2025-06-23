@@ -80,29 +80,110 @@ jobs:
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="encrypt=true"
           
-          # Check for and force unlock any stale locks
-          echo "🔓 Checking for stale state locks..."
-          if terraform plan -detailed-exitcode >/dev/null 2>&1; then
-            echo "✅ No state lock detected"
-          else
-            echo "⚠️ State lock detected, attempting to force unlock..."
-            # Try to get the lock ID from the error message
-            LOCK_ID=$(terraform plan 2>&1 | grep -o 'ID: [a-f0-9-]*' | cut -d' ' -f2 || echo "")
-            if [ ! -z "$LOCK_ID" ]; then
-              echo "🔓 Force unlocking with ID: $LOCK_ID"
-              terraform force-unlock -force "$LOCK_ID"
+          # Check if network state exists and has outputs
+          echo "🔍 Checking network state availability..."
+          NETWORK_STATE_EXISTS=$(aws s3api head-object \
+            --bucket ${{ env.BUCKET_NAME }} \
+            --key ${{ env.ENVIRONMENT }}/network/terraform.tfstate 2>/dev/null && echo "true" || echo "false")
+          
+          if [ "$NETWORK_STATE_EXISTS" = "false" ]; then
+            echo "⚠️ Network state not found. Checking if EKS resources exist directly..."
+            
+            # Check if EKS cluster exists directly
+            CLUSTER_EXISTS=$(aws eks describe-cluster \
+              --name ${{ env.CLUSTER_NAME }} \
+              --query 'cluster.name' \
+              --output text 2>/dev/null || echo "false")
+            
+            if [ "$CLUSTER_EXISTS" = "${{ env.CLUSTER_NAME }}" ]; then
+              echo "⚠️ EKS cluster exists but network state is missing. Attempting direct cleanup..."
+              
+              # Try to destroy with -refresh=false to skip state reading
+              terraform destroy -auto-approve -refresh=false \
+                -var="cluster_name=${{ env.CLUSTER_NAME }}" \
+                -var="aws_region=${{ env.AWS_REGION }}" \
+                -var="project_name=${{ env.PROJECT_NAME }}" \
+                -var="environment=${{ env.ENVIRONMENT }}" \
+                -var="cluster_role_name=${{ env.ENVIRONMENT == 'production' && 'production-vanillatstodo-cluster-role' || 'staging-vanillatstodo-cluster-role' }}" || true
             else
-              echo "⚠️ Could not determine lock ID, trying generic unlock..."
-              terraform force-unlock -force f2e10d17-e3da-6e08-aef1-7a64455b038d || true
+              echo "✅ EKS cluster not found. Skipping EKS destruction."
             fi
+          else
+            echo "✅ Network state found. Proceeding with normal EKS destruction..."
+            
+            # Check for and force unlock any stale locks
+            echo "🔓 Checking for stale state locks..."
+            if terraform plan -detailed-exitcode >/dev/null 2>&1; then
+              echo "✅ No state lock detected"
+            else
+              echo "⚠️ State lock detected, attempting to force unlock..."
+              # Try to get the lock ID from the error message
+              LOCK_ID=$(terraform plan 2>&1 | grep -o 'ID: [a-f0-9-]*' | cut -d' ' -f2 || echo "")
+              if [ ! -z "$LOCK_ID" ]; then
+                echo "🔓 Force unlocking with ID: $LOCK_ID"
+                terraform force-unlock -force "$LOCK_ID"
+              else
+                echo "⚠️ Could not determine lock ID, trying generic unlock..."
+                terraform force-unlock -force f2e10d17-e3da-6e08-aef1-7a64455b038d || true
+              fi
+            fi
+            
+            terraform destroy -auto-approve \
+              -var="cluster_name=${{ env.CLUSTER_NAME }}" \
+              -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="project_name=${{ env.PROJECT_NAME }}" \
+              -var="environment=${{ env.ENVIRONMENT }}" \
+              -var="cluster_role_name=${{ env.ENVIRONMENT == 'production' && 'production-vanillatstodo-cluster-role' || 'staging-vanillatstodo-cluster-role' }}"
+          fi
+
+      - name: Manual EKS Cleanup (if needed)
+        id: manual_eks_cleanup
+        run: |
+          echo "🔍 Checking for any remaining EKS resources..."
+          
+          # Check for EKS clusters
+          CLUSTERS=$(aws eks list-clusters --query "clusters[?contains(@, '${{ env.CLUSTER_NAME }}')]" --output text)
+          if [ ! -z "$CLUSTERS" ] && [ "$CLUSTERS" != "None" ]; then
+            echo "⚠️ Found EKS clusters: $CLUSTERS"
+            
+            for cluster in $CLUSTERS; do
+              echo "🗑️ Deleting EKS cluster: $cluster"
+              
+              # Delete node groups first
+              NODE_GROUPS=$(aws eks list-nodegroups --cluster-name $cluster --query "nodegroups" --output text 2>/dev/null || echo "")
+              if [ ! -z "$NODE_GROUPS" ] && [ "$NODE_GROUPS" != "None" ]; then
+                echo "🗑️ Deleting node groups for cluster $cluster: $NODE_GROUPS"
+                for ng in $NODE_GROUPS; do
+                  aws eks delete-nodegroup --cluster-name $cluster --nodegroup-name $ng || true
+                done
+                
+                # Wait for node groups to be deleted
+                echo "⏳ Waiting for node groups to be deleted..."
+                sleep 60
+              fi
+              
+              # Delete the cluster
+              aws eks delete-cluster --name $cluster || true
+            done
+          else
+            echo "✅ No EKS clusters found"
           fi
           
-          terraform destroy -auto-approve \
-            -var="cluster_name=${{ env.CLUSTER_NAME }}" \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}" \
-            -var="cluster_role_name=${{ env.ENVIRONMENT == 'production' && 'production-vanillatstodo-cluster-role' || 'staging-vanillatstodo-cluster-role' }}"
+          # Check for EKS-related IAM roles
+          EKS_ROLES=$(aws iam list-roles --query "Roles[?contains(RoleName, 'eks') && contains(RoleName, '${{ env.PROJECT_NAME }}')].RoleName" --output text)
+          if [ ! -z "$EKS_ROLES" ] && [ "$EKS_ROLES" != "None" ]; then
+            echo "🗑️ Found EKS-related IAM roles: $EKS_ROLES"
+            for role in $EKS_ROLES; do
+              echo "🗑️ Deleting IAM role: $role"
+              # Detach policies first
+              ATTACHED_POLICIES=$(aws iam list-attached-role-policies --role-name $role --query "AttachedPolicies[].PolicyArn" --output text)
+              for policy in $ATTACHED_POLICIES; do
+                aws iam detach-role-policy --role-name $role --policy-arn $policy || true
+              done
+              # Delete the role
+              aws iam delete-role --role-name $role || true
+            done
+          fi
 
       - name: Destroy Monitoring Resources
         id: monitoring_cleanup
