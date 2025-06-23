@@ -120,9 +120,9 @@ jobs:
       - name: Set Environment-Specific Role Name
         run: |
           if [[ "${{ env.ENVIRONMENT }}" == "production" ]]; then
-            echo "EKS_CLUSTER_ROLE=production-vanillatstodo-eks-cluster" >> $GITHUB_ENV
+            echo "EKS_CLUSTER_ROLE=production-vanillatstodo-cluster-role" >> $GITHUB_ENV
           else
-            echo "EKS_CLUSTER_ROLE=staging-vanillatstodo-eks-cluster" >> $GITHUB_ENV
+            echo "EKS_CLUSTER_ROLE=staging-vanillatstodo-cluster-role" >> $GITHUB_ENV
           fi
 
       - name: Deploy EKS Resources
