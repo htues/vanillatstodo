@@ -37,7 +37,7 @@ resource "aws_subnet" "public_a" {
   map_public_ip_on_launch = true
 
   tags = merge(local.common_tags, {
-    Name                                        = "${var.environment}-public-a"
+    Name                                        = "${var.environment}-${var.project_name}-public-a"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     "kubernetes.io/role/elb"                    = "1"
   })
@@ -51,7 +51,7 @@ resource "aws_subnet" "public_b" {
   map_public_ip_on_launch = true
 
   tags = merge(local.common_tags, {
-    Name                                        = "${var.environment}-public-b"
+    Name                                        = "${var.environment}-${var.project_name}-public-b"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     "kubernetes.io/role/elb"                    = "1"
   })
@@ -64,7 +64,7 @@ resource "aws_subnet" "private_a" {
   availability_zone = "${var.aws_region}a"
 
   tags = merge(local.common_tags, {
-    Name                                        = "${var.environment}-private-a"
+    Name                                        = "${var.environment}-${var.project_name}-private-a"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     "kubernetes.io/role/internal-elb"           = "1"
   })
@@ -76,7 +76,7 @@ resource "aws_subnet" "private_b" {
   availability_zone = "${var.aws_region}b"
 
   tags = merge(local.common_tags, {
-    Name                                        = "${var.environment}-private-b"
+    Name                                        = "${var.environment}-${var.project_name}-private-b"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     "kubernetes.io/role/internal-elb"           = "1"
   })
@@ -92,7 +92,7 @@ resource "aws_route_table" "public" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-public"
+    Name = "${var.environment}-${var.project_name}-public"
   })
 }
 
@@ -106,7 +106,7 @@ resource "aws_route_table" "private_a" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-private-a"
+    Name = "${var.environment}-${var.project_name}-private-a"
   })
   depends_on = [aws_nat_gateway.nat_a]
 }
@@ -120,7 +120,7 @@ resource "aws_route_table" "private_b" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-private-b"
+    Name = "${var.environment}-${var.project_name}-private-b"
   })
   depends_on = [aws_nat_gateway.nat_b]
 }
@@ -150,7 +150,7 @@ resource "aws_route_table_association" "private_b" {
 resource "aws_eip" "nat_a" {
   domain = "vpc"
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-nat-a"
+    Name = "${var.environment}-${var.project_name}-nat-a"
   })
 }
 
@@ -159,7 +159,7 @@ resource "aws_nat_gateway" "nat_a" {
   subnet_id     = aws_subnet.public_a.id
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-nat-a"
+    Name = "${var.environment}-${var.project_name}-nat-a"
   })
   depends_on = [aws_internet_gateway.main]
 }
@@ -167,7 +167,7 @@ resource "aws_nat_gateway" "nat_a" {
 resource "aws_eip" "nat_b" {
   domain = "vpc"
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-nat-b"
+    Name = "${var.environment}-${var.project_name}-nat-b"
   })
 }
 
@@ -176,13 +176,13 @@ resource "aws_nat_gateway" "nat_b" {
   subnet_id     = aws_subnet.public_b.id
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-nat-b"
+    Name = "${var.environment}-${var.project_name}-nat-b"
   })
   depends_on = [aws_internet_gateway.main]
 }
 
 resource "aws_security_group" "vpc_endpoints" {
-  name_prefix = "${var.project_name}-vpc-endpoints-"
+  name_prefix = "${var.environment}-${var.project_name}-vpc-endpoints-"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -200,7 +200,7 @@ resource "aws_security_group" "vpc_endpoints" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-vpc-endpoints-sg"
+    Name = "${var.environment}-${var.project_name}-vpc-endpoints-sg"
   })
 }
 
@@ -216,7 +216,7 @@ resource "aws_vpc_endpoint" "s3" {
   ]
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-s3-endpoint"
+    Name = "${var.environment}-${var.project_name}-s3-endpoint"
   })
 }
 
@@ -230,7 +230,7 @@ resource "aws_vpc_endpoint" "ecr_api" {
   private_dns_enabled = false
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-ecr-api-endpoint"
+    Name = "${var.environment}-${var.project_name}-ecr-api-endpoint"
   })
   depends_on = [aws_route_table.private_a, aws_route_table.private_b]
 }
@@ -245,7 +245,7 @@ resource "aws_vpc_endpoint" "ecr_dkr" {
   private_dns_enabled = false
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-ecr-dkr-endpoint"
+    Name = "${var.environment}-${var.project_name}-ecr-dkr-endpoint"
   })
   depends_on = [aws_route_table.private_a, aws_route_table.private_b]
 }

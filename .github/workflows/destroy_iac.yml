@@ -478,7 +478,7 @@ jobs:
 
           # Delete CloudWatch Dashboard
           echo "🗑️ Deleting CloudWatch Dashboard..."
-          aws cloudwatch delete-dashboards --dashboard-names "vanillatstodo-dashboard" || true
+          aws cloudwatch delete-dashboards --dashboard-names "${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-${{ env.CLUSTER_NAME }}-dashboard" || true
 
           # Delete CloudWatch Alarms
           echo "🗑️ Deleting CloudWatch Alarms..."
@@ -519,10 +519,10 @@ jobs:
             ["VPC"]=0
           )
 
-          # Clean up EIPs with staging-nat pattern
-          echo "🔍 Finding EIPs with staging-nat pattern..."
+          # Clean up EIPs with environment-project-nat pattern
+          echo "🔍 Finding EIPs with ${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-nat pattern..."
           STAGING_EIPS=$(aws ec2 describe-addresses \
-            --filters "Name=tag:Name,Values=staging-nat-*" \
+            --filters "Name=tag:Name,Values=${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-nat-*" \
             --query 'Addresses[*].AllocationId' \
             --output text || echo "")
 

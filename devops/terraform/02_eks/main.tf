@@ -20,7 +20,7 @@ locals {
 
 # Security group for EKS
 resource "aws_security_group" "eks_cluster" {
-  name        = "${var.project_name}-eks-cluster-sg"
+  name        = "${var.environment}-${var.project_name}-eks-cluster-sg"
   description = "Security group for EKS cluster"
   vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
 
@@ -32,7 +32,7 @@ resource "aws_security_group" "eks_cluster" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.cluster_name}-sg"
+    Name = "${var.environment}-${var.project_name}-${var.cluster_name}-sg"
   })
 }
 
@@ -52,7 +52,7 @@ resource "aws_eks_cluster" "main" {
   }
 
   tags = merge(local.common_tags, {
-    Name    = "${var.project_name}-${var.cluster_name}"
+    Name    = "${var.environment}-${var.project_name}-${var.cluster_name}"
     Version = "1.31"
   })
 }
