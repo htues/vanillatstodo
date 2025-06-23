@@ -109,32 +109,45 @@ jobs:
               echo "✅ EKS cluster not found. Skipping EKS destruction."
             fi
           else
-            echo "✅ Network state found. Proceeding with normal EKS destruction..."
+            echo "✅ Network state found. Checking if it contains required outputs..."
             
-            # Check for and force unlock any stale locks
-            echo "🔓 Checking for stale state locks..."
-            if terraform plan -detailed-exitcode >/dev/null 2>&1; then
-              echo "✅ No state lock detected"
+            # Download and check network state content
+            aws s3 cp s3://${{ env.BUCKET_NAME }}/${{ env.ENVIRONMENT }}/network/terraform.tfstate /tmp/network_state.json
+            
+            # Check if state has outputs
+            HAS_OUTPUTS=$(jq -r '.outputs // empty' /tmp/network_state.json 2>/dev/null || echo "false")
+            HAS_VPC_ID=$(jq -r '.outputs.vpc_id.value // empty' /tmp/network_state.json 2>/dev/null || echo "false")
+            
+            if [ "$HAS_OUTPUTS" = "false" ] || [ "$HAS_VPC_ID" = "false" ] || [ "$HAS_VPC_ID" = "null" ]; then
+              echo "⚠️ Network state exists but is empty or missing required outputs. Skipping Terraform EKS destruction."
+              echo "🔄 Will rely on manual EKS cleanup step instead."
             else
-              echo "⚠️ State lock detected, attempting to force unlock..."
-              # Try to get the lock ID from the error message
-              LOCK_ID=$(terraform plan 2>&1 | grep -o 'ID: [a-f0-9-]*' | cut -d' ' -f2 || echo "")
-              if [ ! -z "$LOCK_ID" ]; then
-                echo "🔓 Force unlocking with ID: $LOCK_ID"
-                terraform force-unlock -force "$LOCK_ID"
+              echo "✅ Network state has required outputs. Proceeding with normal EKS destruction..."
+              
+              # Check for and force unlock any stale locks
+              echo "🔓 Checking for stale state locks..."
+              if terraform plan -detailed-exitcode >/dev/null 2>&1; then
+                echo "✅ No state lock detected"
               else
-                echo "⚠️ Could not determine lock ID, trying generic unlock..."
-                terraform force-unlock -force f2e10d17-e3da-6e08-aef1-7a64455b038d || true
+                echo "⚠️ State lock detected, attempting to force unlock..."
+                # Try to get the lock ID from the error message
+                LOCK_ID=$(terraform plan 2>&1 | grep -o 'ID: [a-f0-9-]*' | cut -d' ' -f2 || echo "")
+                if [ ! -z "$LOCK_ID" ]; then
+                  echo "🔓 Force unlocking with ID: $LOCK_ID"
+                  terraform force-unlock -force "$LOCK_ID"
+                else
+                  echo "⚠️ Could not determine lock ID, trying generic unlock..."
+                  terraform force-unlock -force f2e10d17-e3da-6e08-aef1-7a64455b038d || true
+                fi
               fi
+              
+              terraform destroy -auto-approve \
+                -var="cluster_name=${{ env.CLUSTER_NAME }}" \
+                -var="aws_region=${{ env.AWS_REGION }}" \
+                -var="project_name=${{ env.PROJECT_NAME }}" \
+                -var="environment=${{ env.ENVIRONMENT }}" \
+                -var="cluster_role_name=${{ env.ENVIRONMENT == 'production' && 'production-vanillatstodo-cluster-role' || 'staging-vanillatstodo-cluster-role' }}"
             fi
-            
-            terraform destroy -auto-approve \
-              -var="cluster_name=${{ env.CLUSTER_NAME }}" \
-              -var="aws_region=${{ env.AWS_REGION }}" \
-              -var="project_name=${{ env.PROJECT_NAME }}" \
-              -var="environment=${{ env.ENVIRONMENT }}" \
-              -var="cluster_role_name=${{ env.ENVIRONMENT == 'production' && 'production-vanillatstodo-cluster-role' || 'staging-vanillatstodo-cluster-role' }}"
-          fi
 
       - name: Manual EKS Cleanup (if needed)
         id: manual_eks_cleanup
@@ -169,6 +182,40 @@ jobs:
             echo "✅ No EKS clusters found"
           fi
           
+          # Check for EKS-related security groups
+          echo "🔍 Checking for EKS-related security groups..."
+          EKS_SGS=$(aws ec2 describe-security-groups \
+            --filters "Name=group-name,Values=*eks*" "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
+            --query 'SecurityGroups[*].GroupId' \
+            --output text)
+          
+          if [ ! -z "$EKS_SGS" ] && [ "$EKS_SGS" != "None" ]; then
+            echo "🗑️ Found EKS security groups: $EKS_SGS"
+            for sg in $EKS_SGS; do
+              echo "🗑️ Deleting security group: $sg"
+              aws ec2 delete-security-group --group-id $sg || true
+            done
+          fi
+          
+          # Check for EKS-related VPC endpoints
+          echo "🔍 Checking for EKS-related VPC endpoints..."
+          VPC_IDS=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Name,Values=*vanillatstodo*" \
+            --query 'Vpcs[*].VpcId' \
+            --output text)
+          
+          for VPC_ID in $VPC_IDS; do
+            EKS_ENDPOINTS=$(aws ec2 describe-vpc-endpoints \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=service-name,Values=com.amazonaws.*.eks" \
+              --query 'VpcEndpoints[*].VpcEndpointId' \
+              --output text)
+            
+            if [ ! -z "$EKS_ENDPOINTS" ] && [ "$EKS_ENDPOINTS" != "None" ]; then
+              echo "🗑️ Found EKS VPC endpoints: $EKS_ENDPOINTS"
+              aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $EKS_ENDPOINTS || true
+            fi
+          done
+          
           # Check for EKS-related IAM roles
           EKS_ROLES=$(aws iam list-roles --query "Roles[?contains(RoleName, 'eks') && contains(RoleName, '${{ env.PROJECT_NAME }}')].RoleName" --output text)
           if [ ! -z "$EKS_ROLES" ] && [ "$EKS_ROLES" != "None" ]; then
@@ -184,6 +231,10 @@ jobs:
               aws iam delete-role --role-name $role || true
             done
           fi
+          
+          # Wait a bit for resources to be fully deleted
+          echo "⏳ Waiting for EKS resources to be fully deleted..."
+          sleep 30
 
       - name: Destroy Monitoring Resources
         id: monitoring_cleanup
