@@ -148,6 +148,7 @@ jobs:
                 -var="environment=${{ env.ENVIRONMENT }}" \
                 -var="cluster_role_name=${{ env.ENVIRONMENT == 'production' && 'production-vanillatstodo-cluster-role' || 'staging-vanillatstodo-cluster-role' }}"
             fi
+          fi
 
       - name: Manual EKS Cleanup (if needed)
         id: manual_eks_cleanup
@@ -215,23 +216,7 @@ jobs:
               aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $EKS_ENDPOINTS || true
             fi
           done
-          
-          # Check for EKS-related IAM roles
-          EKS_ROLES=$(aws iam list-roles --query "Roles[?contains(RoleName, 'eks') && contains(RoleName, '${{ env.PROJECT_NAME }}')].RoleName" --output text)
-          if [ ! -z "$EKS_ROLES" ] && [ "$EKS_ROLES" != "None" ]; then
-            echo "🗑️ Found EKS-related IAM roles: $EKS_ROLES"
-            for role in $EKS_ROLES; do
-              echo "🗑️ Deleting IAM role: $role"
-              # Detach policies first
-              ATTACHED_POLICIES=$(aws iam list-attached-role-policies --role-name $role --query "AttachedPolicies[].PolicyArn" --output text)
-              for policy in $ATTACHED_POLICIES; do
-                aws iam detach-role-policy --role-name $role --policy-arn $policy || true
-              done
-              # Delete the role
-              aws iam delete-role --role-name $role || true
-            done
-          fi
-          
+                    
           # Wait a bit for resources to be fully deleted
           echo "⏳ Waiting for EKS resources to be fully deleted..."
           sleep 30
