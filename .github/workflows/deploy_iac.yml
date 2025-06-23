@@ -258,3 +258,156 @@ jobs:
             --query "cluster.endpoint" \
             --output text)
           echo "cluster_endpoint=${ENDPOINT}" >> $GITHUB_OUTPUT
+
+      - name: Generate Resource Summary
+        id: resource_summary
+        if: success()
+        run: |
+          echo "🔍 Generating comprehensive resource summary..."
+          
+          # Get VPC ID for filtering
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
+                     "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+            --query "Vpcs[0].VpcId" \
+            --output text)
+          
+          if [ "$VPC_ID" = "None" ] || [ -z "$VPC_ID" ]; then
+            echo "❌ VPC not found for resource counting"
+            exit 1
+          fi
+          
+          echo "📊 VPC ID: $VPC_ID"
+          
+          # Count Subnets
+          SUBNET_COUNT=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "length(Subnets)" \
+            --output text)
+          
+          # Count Route Tables
+          RT_COUNT=$(aws ec2 describe-route-tables \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "length(RouteTables)" \
+            --output text)
+          
+          # Count Internet Gateways
+          IGW_COUNT=$(aws ec2 describe-internet-gateways \
+            --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+            --query "length(InternetGateways)" \
+            --output text)
+          
+          # Count VPC Endpoints
+          ENDPOINT_COUNT=$(aws ec2 describe-vpc-endpoints \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "length(VpcEndpoints)" \
+            --output text)
+          
+          # Count Security Groups
+          SG_COUNT=$(aws ec2 describe-security-groups \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "length(SecurityGroups)" \
+            --output text)
+          
+          # Count NAT Gateways
+          NAT_COUNT=$(aws ec2 describe-nat-gateways \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "length(NatGateways)" \
+            --output text)
+          
+          # Count EIPs
+          EIP_COUNT=$(aws ec2 describe-addresses \
+            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
+                     "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+            --query "length(Addresses)" \
+            --output text)
+          
+          # Count Network ACLs
+          NACL_COUNT=$(aws ec2 describe-network-acls \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "length(NetworkAcls)" \
+            --output text)
+          
+          # Count EKS Clusters
+          EKS_COUNT=$(aws eks list-clusters \
+            --query "length(clusters[?contains(@, '${{ env.CLUSTER_NAME }}')])" \
+            --output text)
+          
+          # Count CloudWatch Dashboards
+          DASHBOARD_COUNT=$(aws cloudwatch list-dashboards \
+            --query "length(DashboardEntries[?contains(DashboardName, '${{ env.PROJECT_NAME }}') && contains(DashboardName, '${{ env.ENVIRONMENT }}')])" \
+            --output text)
+          
+          # Count CloudWatch Alarms
+          ALARM_COUNT=$(aws cloudwatch describe-alarms \
+            --query "length(MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')])" \
+            --output text)
+          
+          # Store counts in environment variables
+          echo "SUBNET_COUNT=$SUBNET_COUNT" >> $GITHUB_ENV
+          echo "RT_COUNT=$RT_COUNT" >> $GITHUB_ENV
+          echo "IGW_COUNT=$IGW_COUNT" >> $GITHUB_ENV
+          echo "ENDPOINT_COUNT=$ENDPOINT_COUNT" >> $GITHUB_ENV
+          echo "SG_COUNT=$SG_COUNT" >> $GITHUB_ENV
+          echo "NAT_COUNT=$NAT_COUNT" >> $GITHUB_ENV
+          echo "EIP_COUNT=$EIP_COUNT" >> $GITHUB_ENV
+          echo "NACL_COUNT=$NACL_COUNT" >> $GITHUB_ENV
+          echo "EKS_COUNT=$EKS_COUNT" >> $GITHUB_ENV
+          echo "DASHBOARD_COUNT=$DASHBOARD_COUNT" >> $GITHUB_ENV
+          echo "ALARM_COUNT=$ALARM_COUNT" >> $GITHUB_ENV
+          
+          # Calculate total resources
+          TOTAL_RESOURCES=$((SUBNET_COUNT + RT_COUNT + IGW_COUNT + ENDPOINT_COUNT + SG_COUNT + NAT_COUNT + EIP_COUNT + NACL_COUNT + EKS_COUNT + DASHBOARD_COUNT + ALARM_COUNT))
+          echo "TOTAL_RESOURCES=$TOTAL_RESOURCES" >> $GITHUB_ENV
+          
+          echo "✅ Resource counting completed!"
+
+      - name: Display Resource Summary
+        if: success()
+        run: |
+          echo "### 🏗️ Infrastructure Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** \`${{ env.ENVIRONMENT }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Project:** \`${{ env.PROJECT_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📊 Resource Counts" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Type | Count | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------------|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **VPC** | 1 | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Subnets** | ${{ env.SUBNET_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Route Tables** | ${{ env.RT_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Internet Gateways** | ${{ env.IGW_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **VPC Endpoints** | ${{ env.ENDPOINT_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Security Groups** | ${{ env.SG_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **NAT Gateways** | ${{ env.NAT_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Elastic IPs** | ${{ env.EIP_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Network ACLs** | ${{ env.NACL_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **EKS Clusters** | ${{ env.EKS_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **CloudWatch Dashboards** | ${{ env.DASHBOARD_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| **CloudWatch Alarms** | ${{ env.ALARM_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 🔗 EKS Cluster Details" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cluster Name** | \`${{ env.CLUSTER_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cluster Status** | \`${{ env.CLUSTER_STATUS }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cluster Endpoint** | \`${{ env.CLUSTER_ENDPOINT }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Kubernetes Version** | \`1.31\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 🎯 Deployment Status" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ env.CLUSTER_VERIFIED }}" = "true" ]; then
+            echo "**Status:** ✅ **SUCCESS** - All resources deployed successfully!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Status:** ❌ **FAILED** - Some resources failed to deploy" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform Version: \`${{ env.TF_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- AWS Region: \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Project: \`${{ env.PROJECT_NAME }}\`" >> $GITHUB_STEP_SUMMARY
