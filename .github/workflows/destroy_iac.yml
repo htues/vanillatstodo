@@ -86,6 +86,8 @@ jobs:
             --bucket ${{ env.BUCKET_NAME }} \
             --key ${{ env.ENVIRONMENT }}/network/terraform.tfstate 2>/dev/null && echo "true" || echo "false")
           
+          echo "📊 Network state exists: $NETWORK_STATE_EXISTS"
+          
           if [ "$NETWORK_STATE_EXISTS" = "false" ]; then
             echo "⚠️ Network state not found. Checking if EKS resources exist directly..."
             
@@ -94,6 +96,8 @@ jobs:
               --name ${{ env.CLUSTER_NAME }} \
               --query 'cluster.name' \
               --output text 2>/dev/null || echo "false")
+            
+            echo "📊 EKS cluster exists: $CLUSTER_EXISTS"
             
             if [ "$CLUSTER_EXISTS" = "${{ env.CLUSTER_NAME }}" ]; then
               echo "⚠️ EKS cluster exists but network state is missing. Attempting direct cleanup..."
@@ -118,11 +122,18 @@ jobs:
             HAS_OUTPUTS=$(jq -r '.outputs // empty' /tmp/network_state.json 2>/dev/null || echo "false")
             HAS_VPC_ID=$(jq -r '.outputs.vpc_id.value // empty' /tmp/network_state.json 2>/dev/null || echo "false")
             
-            if [ "$HAS_OUTPUTS" = "false" ] || [ "$HAS_VPC_ID" = "false" ] || [ "$HAS_VPC_ID" = "null" ]; then
+            echo "📊 Network state has outputs: $HAS_OUTPUTS"
+            echo "📊 Network state has vpc_id: $HAS_VPC_ID"
+            
+            if [ "$HAS_OUTPUTS" = "false" ] || [ "$HAS_VPC_ID" = "false" ] || [ "$HAS_VPC_ID" = "null" ] || [ "$HAS_VPC_ID" = "" ]; then
               echo "⚠️ Network state exists but is empty or missing required outputs. Skipping Terraform EKS destruction."
               echo "🔄 Will rely on manual EKS cleanup step instead."
+              echo "✅ EKS Terraform destruction skipped successfully."
+              # Set a flag to indicate we're skipping Terraform EKS destruction
+              echo "SKIP_TERRAFORM_EKS=true" >> $GITHUB_ENV
             else
               echo "✅ Network state has required outputs. Proceeding with normal EKS destruction..."
+              echo "SKIP_TERRAFORM_EKS=false" >> $GITHUB_ENV
               
               # Check for and force unlock any stale locks
               echo "🔓 Checking for stale state locks..."
