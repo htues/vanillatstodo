@@ -545,7 +545,7 @@ jobs:
               fi
             done
           else
-            echo "   No staging NAT EIPs found"
+            echo "   No ${{ env.ENVIRONMENT }} NAT EIPs found"
           fi
 
           echo "🔍 Finding all VPCs with vanillatstodo tag..."
@@ -839,15 +839,15 @@ jobs:
           echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: 1.31 |" >> $GITHUB_STEP_SUMMARY
           echo "| CloudWatch | ${CLOUDWATCH_STATUS:-❌} | Monitoring |" >> $GITHUB_STEP_SUMMARY
 
-          # Network resources with cleanup details
+          # Network resources with cleanup details - using correct variable names
           echo "| Network - EIP | ${NETWORK_EIP_STATUS:-❌} | Cleaned: ${EIP_CLEANED:-0} of ${EIP_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
           echo "| Network - VPC Endpoints | ${NETWORK_ENDPOINTS_STATUS:-❌} | Cleaned: ${ENDPOINTS_CLEANED:-0} of ${ENDPOINTS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network - NAT & EIP | ${NETWORK_NAT_STATUS:-❌} | Cleaned: ${NATS_CLEANED:-0} of ${NATS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network - Route Tables | ${NETWORK_ROUTE_STATUS:-❌} | Cleaned: ${ROUTES_CLEANED:-0} of ${ROUTES_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network - NACLs | ${NETWORK_NACL_STATUS:-❌} | Cleaned: ${NACLS_CLEANED:-0} of ${NACLS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network - Subnets | ${NETWORK_SUBNET_STATUS:-❌} | Cleaned: ${SUBNETS_CLEANED:-0} of ${SUBNETS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - NAT Gateways | ${NETWORK_NAT_STATUS:-❌} | Cleaned: ${NAT_CLEANED:-0} of ${NAT_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - Route Tables | ${NETWORK_ROUTE_TABLES_STATUS:-❌} | Cleaned: ${ROUTE_TABLES_CLEANED:-0} of ${ROUTE_TABLES_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - NACLs | ${NETWORK_NACLS_STATUS:-❌} | Cleaned: ${NACLS_CLEANED:-0} of ${NACLS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - Subnets | ${NETWORK_SUBNETS_STATUS:-❌} | Cleaned: ${SUBNETS_CLEANED:-0} of ${SUBNETS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
           echo "| Network - IGW | ${NETWORK_IGW_STATUS:-❌} | Cleaned: ${IGW_CLEANED:-0} of ${IGW_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Network - VPCs | ${NETWORK_VPC_STATUS:-❌} | Cleaned: ${VPCS_CLEANED:-0} of ${VPCS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network - VPCs | ${NETWORK_VPC_STATUS:-❌} | Cleaned: ${VPC_CLEANED:-0} of ${VPC_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
           echo "| Network - Overall | ${NETWORK_STATUS:-❌} | Network Stack |" >> $GITHUB_STEP_SUMMARY
 
           echo "| S3 State | ${S3_STATUS:-❌} | Terraform State |" >> $GITHUB_STEP_SUMMARY
