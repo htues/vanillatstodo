@@ -3,7 +3,7 @@ terraform {
 
   backend "s3" {
     bucket         = "vanillatstodo-terraform-state"
-    key            = "experimental/network/terraform.tfstate"
+    key            = "ENVIRONMENT/network/terraform.tfstate"
     region         = "us-east-2"
     encrypt        = true
     use_lockfile   = true
