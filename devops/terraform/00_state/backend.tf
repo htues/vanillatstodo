@@ -8,4 +8,11 @@ terraform {
     encrypt        = true
     use_lockfile   = true
   }
+}
+
+resource "aws_s3_bucket_versioning" "state" {
+  bucket = "vanillatstodo-terraform-state"
+  versioning_configuration {
+    status = "Enabled"
+  }
 } 
