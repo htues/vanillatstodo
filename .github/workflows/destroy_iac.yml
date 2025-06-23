@@ -735,8 +735,82 @@ jobs:
           BUCKETS=$(aws s3api list-buckets --query "Buckets[?contains(Name, '${{ env.PROJECT_NAME }}')].Name" --output text)
           if [ ! -z "$BUCKETS" ] && [ "$BUCKETS" != "None" ]; then
             for bucket in $BUCKETS; do
-              echo "🗑️ Deleting S3 bucket: $bucket"
-              aws s3 rb s3://$bucket --force || true
+              echo "🗑️ Processing S3 bucket: $bucket"
+              
+              # Check if bucket exists and is accessible
+              if aws s3api head-bucket --bucket $bucket 2>/dev/null; then
+                echo "   ✅ Bucket exists and is accessible"
+                
+                # 1. Check if versioning is enabled
+                VERSIONING=$(aws s3api get-bucket-versioning --bucket $bucket --query 'Status' --output text 2>/dev/null || echo "None")
+                echo "   📊 Versioning status: $VERSIONING"
+                
+                if [ "$VERSIONING" = "Enabled" ]; then
+                  echo "   🔄 Versioning is enabled. Removing all versions and delete markers..."
+                  
+                  # Remove all versions and delete markers
+                  aws s3api list-object-versions \
+                    --bucket $bucket \
+                    --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
+                    --output json > /tmp/versions.json
+                  
+                  if [ -s /tmp/versions.json ] && [ "$(jq -r '.Objects | length' /tmp/versions.json)" -gt 0 ]; then
+                    echo "   🗑️ Deleting all object versions..."
+                    aws s3api delete-objects --bucket $bucket --delete file:///tmp/versions.json || true
+                  fi
+                  
+                  # Remove all delete markers
+                  aws s3api list-object-versions \
+                    --bucket $bucket \
+                    --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' \
+                    --output json > /tmp/delete-markers.json
+                  
+                  if [ -s /tmp/delete-markers.json ] && [ "$(jq -r '.Objects | length' /tmp/delete-markers.json)" -gt 0 ]; then
+                    echo "   🗑️ Deleting all delete markers..."
+                    aws s3api delete-objects --bucket $bucket --delete file:///tmp/delete-markers.json || true
+                  fi
+                fi
+                
+                # 2. Remove all objects (current versions)
+                echo "   🗑️ Removing all current objects..."
+                aws s3 rm s3://$bucket --recursive || true
+                
+                # 3. Check for any remaining objects
+                REMAINING_OBJECTS=$(aws s3api list-objects-v2 --bucket $bucket --query 'Contents[].Key' --output text 2>/dev/null || echo "")
+                if [ ! -z "$REMAINING_OBJECTS" ] && [ "$REMAINING_OBJECTS" != "None" ]; then
+                  echo "   ⚠️ Found remaining objects: $REMAINING_OBJECTS"
+                  echo "   🗑️ Force removing remaining objects..."
+                  aws s3 rm s3://$bucket --recursive --force || true
+                fi
+                
+                # 4. Check for any remaining versions
+                REMAINING_VERSIONS=$(aws s3api list-object-versions --bucket $bucket --query 'Versions[].Key' --output text 2>/dev/null || echo "")
+                if [ ! -z "$REMAINING_VERSIONS" ] && [ "$REMAINING_VERSIONS" != "None" ]; then
+                  echo "   ⚠️ Found remaining versions: $REMAINING_VERSIONS"
+                  echo "   🗑️ Force removing remaining versions..."
+                  aws s3api list-object-versions \
+                    --bucket $bucket \
+                    --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
+                    --output json | aws s3api delete-objects --bucket $bucket --delete file:///dev/stdin || true
+                fi
+                
+                # 5. Final verification - check if bucket is truly empty
+                FINAL_CHECK=$(aws s3api list-objects-v2 --bucket $bucket --query 'Contents[].Key' --output text 2>/dev/null || echo "")
+                FINAL_VERSIONS=$(aws s3api list-object-versions --bucket $bucket --query 'Versions[].Key' --output text 2>/dev/null || echo "")
+                
+                if [ -z "$FINAL_CHECK" ] && [ -z "$FINAL_VERSIONS" ]; then
+                  echo "   ✅ Bucket is empty. Proceeding with deletion..."
+                  aws s3api delete-bucket --bucket $bucket || true
+                  echo "   ✅ Bucket deletion completed"
+                else
+                  echo "   ⚠️ Bucket still has content. Attempting force deletion..."
+                  aws s3 rb s3://$bucket --force || true
+                fi
+              else
+                echo "   ⚠️ Bucket does not exist or is not accessible"
+              fi
+              
+              echo "   ---"
             done
           else
             echo "No S3 buckets found with project name pattern"
