@@ -87,16 +87,6 @@ variable "vpc_flow_log_retention" {
   }
 }
 
-variable "tags" {
-  description = "Common tags for all resources"
-  type        = map(string)
-  default = {
-    Project     = "vanillatstodo"
-    ManagedBy   = "terraform"
-    Environment = var.environment
-  }
-}
-
 variable "enable_dns" {
   description = "Enable DNS support and DNS hostnames in VPC"
   type        = bool
