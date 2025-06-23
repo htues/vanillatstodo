@@ -232,20 +232,6 @@ jobs:
           echo "⏳ Waiting for EKS resources to be fully deleted..."
           sleep 30
 
-      - name: Destroy Monitoring Resources
-        id: monitoring_cleanup
-        run: |
-          cd devops/terraform/03_monitoring
-          terraform init -reconfigure \
-            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
-            -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="encrypt=true"
-          terraform destroy -auto-approve \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}"
-
       - name: Wait for EKS Resources to be Fully Deleted
         id: wait_for_eks_cleanup
         run: |
@@ -275,6 +261,182 @@ jobs:
             echo "✅ No remaining EKS node groups found"
           fi
 
+      - name: Destroy Monitoring Resources
+        id: monitoring_cleanup
+        run: |
+          cd devops/terraform/03_monitoring
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+          terraform destroy -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
+
+      - name: Enhanced Network Dependency Cleanup
+        id: enhanced_network_cleanup
+        run: |
+          echo "🔍 Performing enhanced network dependency cleanup..."
+          
+          # Find all VPCs with our project tags
+          VPC_IDS=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Name,Values=*vanillatstodo*" \
+            --query 'Vpcs[*].VpcId' \
+            --output text)
+          
+          for VPC_ID in $VPC_IDS; do
+            echo "🔍 Cleaning up dependencies for VPC: $VPC_ID"
+            
+            # 1. Delete all VPC endpoints
+            echo "🗑️ Deleting all VPC endpoints..."
+            ENDPOINTS=$(aws ec2 describe-vpc-endpoints \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'VpcEndpoints[*].VpcEndpointId' \
+              --output text)
+            
+            if [ ! -z "$ENDPOINTS" ] && [ "$ENDPOINTS" != "None" ]; then
+              echo "🗑️ Found VPC endpoints: $ENDPOINTS"
+              aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $ENDPOINTS || true
+              sleep 30
+            fi
+            
+            # 2. Delete all network interfaces
+            echo "🗑️ Deleting all network interfaces..."
+            ENI_IDS=$(aws ec2 describe-network-interfaces \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'NetworkInterfaces[*].NetworkInterfaceId' \
+              --output text)
+            
+            if [ ! -z "$ENI_IDS" ] && [ "$ENI_IDS" != "None" ]; then
+              echo "🗑️ Found network interfaces: $ENI_IDS"
+              for eni in $ENI_IDS; do
+                ENI_STATUS=$(aws ec2 describe-network-interfaces \
+                  --network-interface-ids $eni \
+                  --query 'NetworkInterfaces[0].Status' \
+                  --output text)
+                if [ "$ENI_STATUS" = "available" ]; then
+                  echo "🗑️ Deleting available network interface: $eni"
+                  aws ec2 delete-network-interface --network-interface-id $eni || true
+                  sleep 5
+                else
+                  echo "⚠️ Network interface $eni is not available (status: $ENI_STATUS)"
+                fi
+              done
+            fi
+            
+            # 3. Delete all security groups (except default)
+            echo "🗑️ Deleting all security groups..."
+            SG_IDS=$(aws ec2 describe-security-groups \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'SecurityGroups[?GroupName!=`default`].GroupId' \
+              --output text)
+            
+            if [ ! -z "$SG_IDS" ] && [ "$SG_IDS" != "None" ]; then
+              echo "🗑️ Found security groups: $SG_IDS"
+              for sg in $SG_IDS; do
+                aws ec2 delete-security-group --group-id $sg || true
+                sleep 2
+              done
+            fi
+            
+            # 4. Delete all route table associations and route tables
+            echo "🗑️ Deleting route table associations..."
+            RT_IDS=$(aws ec2 describe-route-tables \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' \
+              --output text)
+            
+            if [ ! -z "$RT_IDS" ] && [ "$RT_IDS" != "None" ]; then
+              echo "🗑️ Found route tables: $RT_IDS"
+              for rt in $RT_IDS; do
+                # Disassociate all associations first
+                ASSOC_IDS=$(aws ec2 describe-route-tables \
+                  --route-table-id $rt \
+                  --query 'RouteTables[0].Associations[*].RouteTableAssociationId' \
+                  --output text)
+                
+                for assoc in $ASSOC_IDS; do
+                  aws ec2 disassociate-route-table --association-id $assoc || true
+                done
+                
+                # Delete the route table
+                aws ec2 delete-route-table --route-table-id $rt || true
+                sleep 2
+              done
+            fi
+            
+            # 5. Delete all NAT gateways
+            echo "🗑️ Deleting NAT gateways..."
+            NAT_IDS=$(aws ec2 describe-nat-gateways \
+              --filter "Name=vpc-id,Values=$VPC_ID" \
+              --query 'NatGateways[?State!=`deleted`].NatGatewayId' \
+              --output text)
+            
+            if [ ! -z "$NAT_IDS" ] && [ "$NAT_IDS" != "None" ]; then
+              echo "🗑️ Found NAT gateways: $NAT_IDS"
+              for nat in $NAT_IDS; do
+                aws ec2 delete-nat-gateway --nat-gateway-id $nat || true
+              done
+              
+              # Wait for NAT gateways to be deleted
+              if [ ! -z "$NAT_IDS" ]; then
+                echo "⏳ Waiting for NAT gateways to be deleted..."
+                sleep 45
+              fi
+            fi
+            
+            # 6. Delete all network ACLs (except default)
+            echo "🗑️ Deleting network ACLs..."
+            NACL_IDS=$(aws ec2 describe-network-acls \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'NetworkAcls[?!IsDefault].NetworkAclId' \
+              --output text)
+            
+            if [ ! -z "$NACL_IDS" ] && [ "$NACL_IDS" != "None" ]; then
+              echo "🗑️ Found network ACLs: $NACL_IDS"
+              for nacl in $NACL_IDS; do
+                aws ec2 delete-network-acl --network-acl-id $nacl || true
+                sleep 2
+              done
+            fi
+            
+            # 7. Delete all subnets
+            echo "🗑️ Deleting all subnets..."
+            SUBNET_IDS=$(aws ec2 describe-subnets \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'Subnets[*].SubnetId' \
+              --output text)
+            
+            if [ ! -z "$SUBNET_IDS" ] && [ "$SUBNET_IDS" != "None" ]; then
+              echo "🗑️ Found subnets: $SUBNET_IDS"
+              for subnet in $SUBNET_IDS; do
+                aws ec2 delete-subnet --subnet-id $subnet || true
+                sleep 2
+              done
+            fi
+            
+            # 8. Delete internet gateway
+            echo "🗑️ Deleting internet gateway..."
+            IGW_ID=$(aws ec2 describe-internet-gateways \
+              --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+              --query 'InternetGateways[*].InternetGatewayId' \
+              --output text)
+            
+            if [ ! -z "$IGW_ID" ] && [ "$IGW_ID" != "None" ]; then
+              echo "🗑️ Found internet gateway: $IGW_ID"
+              aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID || true
+              aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID || true
+              sleep 2
+            fi
+            
+            echo "✅ Completed dependency cleanup for VPC: $VPC_ID"
+          done
+          
+          echo "⏳ Waiting for all resources to be fully deleted..."
+          sleep 30
+
       - name: Destroy Network Resources
         id: network_cleanup
         run: |
@@ -284,53 +446,6 @@ jobs:
             -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="encrypt=true"
-          
-          # Check for subnet dependencies before destroying
-          echo "🔍 Checking for subnet dependencies..."
-          VPC_IDS=$(aws ec2 describe-vpcs \
-            --filters "Name=tag:Name,Values=*vanillatstodo*" \
-            --query 'Vpcs[*].VpcId' \
-            --output text)
-          
-          for VPC_ID in $VPC_IDS; do
-            echo "🔍 Checking dependencies for VPC: $VPC_ID"
-            
-            # Check for EKS-related resources
-            EKS_ENDPOINTS=$(aws ec2 describe-vpc-endpoints \
-              --filters "Name=vpc-id,Values=$VPC_ID" "Name=service-name,Values=com.amazonaws.*.eks" \
-              --query 'VpcEndpoints[*].VpcEndpointId' \
-              --output text)
-            
-            if [ ! -z "$EKS_ENDPOINTS" ] && [ "$EKS_ENDPOINTS" != "None" ]; then
-              echo "⚠️ Found EKS VPC endpoints: $EKS_ENDPOINTS"
-              echo "🗑️ Deleting EKS VPC endpoints..."
-              aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $EKS_ENDPOINTS
-              sleep 30
-            fi
-            
-            # Check for network interfaces that might be blocking subnet deletion
-            ENI_IDS=$(aws ec2 describe-network-interfaces \
-              --filters "Name=vpc-id,Values=$VPC_ID" \
-              --query 'NetworkInterfaces[*].NetworkInterfaceId' \
-              --output text)
-            
-            if [ ! -z "$ENI_IDS" ] && [ "$ENI_IDS" != "None" ]; then
-              echo "⚠️ Found network interfaces: $ENI_IDS"
-              for eni in $ENI_IDS; do
-                ENI_STATUS=$(aws ec2 describe-network-interfaces \
-                  --network-interface-ids $eni \
-                  --query 'NetworkInterfaces[0].Status' \
-                  --output text)
-                if [ "$ENI_STATUS" = "available" ]; then
-                  echo "🗑️ Deleting available network interface: $eni"
-                  aws ec2 delete-network-interface --network-interface-id $eni
-                  sleep 5
-                else
-                  echo "⚠️ Network interface $eni is not available (status: $ENI_STATUS)"
-                fi
-              done
-            fi
-          done
           
           echo "🚀 Proceeding with network destruction..."
           terraform destroy -auto-approve \
