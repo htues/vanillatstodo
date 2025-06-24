@@ -489,6 +489,73 @@ jobs:
             done
           fi
 
+      - name: Clean Up CloudWatch Log Groups
+        id: cloudwatch_logs_cleanup
+        run: |
+          echo "🔍 Cleaning up CloudWatch Log Groups..."
+          
+          # List of log groups to clean up
+          LOG_GROUPS=(
+            "/aws/eks/vanillatstodo-cluster/cluster"
+            "/aws/vpc/staging-flow-logs"
+          )
+          
+          # Also check for environment-specific flow logs
+          ENV_FLOW_LOGS="/aws/vpc/${{ env.ENVIRONMENT }}-flow-logs"
+          LOG_GROUPS+=("$ENV_FLOW_LOGS")
+          
+          # Also check for any other log groups with our project name
+          PROJECT_LOG_GROUPS=$(aws logs describe-log-groups \
+            --query "logGroups[?contains(logGroupName, '${{ env.PROJECT_NAME }}')].logGroupName" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ ! -z "$PROJECT_LOG_GROUPS" ] && [ "$PROJECT_LOG_GROUPS" != "None" ]; then
+            echo "🔍 Found project-specific log groups: $PROJECT_LOG_GROUPS"
+            for log_group in $PROJECT_LOG_GROUPS; do
+              LOG_GROUPS+=("$log_group")
+            done
+          fi
+          
+          # Remove duplicates and clean up each log group
+          UNIQUE_LOG_GROUPS=($(printf "%s\n" "${LOG_GROUPS[@]}" | sort -u))
+          
+          for log_group in "${UNIQUE_LOG_GROUPS[@]}"; do
+            if [ ! -z "$log_group" ]; then
+              echo "🗑️ Checking log group: $log_group"
+              
+              # Check if log group exists
+              if aws logs describe-log-groups --log-group-name-prefix "$log_group" --query "logGroups[?logGroupName=='$log_group']" --output text | grep -q "$log_group"; then
+                echo "   ✅ Log group exists. Deleting..."
+                
+                # Delete all log streams first
+                echo "   🗑️ Deleting all log streams..."
+                STREAMS=$(aws logs describe-log-streams \
+                  --log-group-name "$log_group" \
+                  --query 'logStreams[*].logStreamName' \
+                  --output text 2>/dev/null || echo "")
+                
+                if [ ! -z "$STREAMS" ] && [ "$STREAMS" != "None" ]; then
+                  for stream in $STREAMS; do
+                    echo "     🗑️ Deleting stream: $stream"
+                    aws logs delete-log-stream --log-group-name "$log_group" --log-stream-name "$stream" || true
+                  done
+                fi
+                
+                # Delete the log group
+                echo "   🗑️ Deleting log group: $log_group"
+                if aws logs delete-log-group --log-group-name "$log_group"; then
+                  echo "   ✅ Successfully deleted log group: $log_group"
+                else
+                  echo "   ⚠️ Failed to delete log group: $log_group"
+                fi
+              else
+                echo "   ℹ️ Log group does not exist: $log_group"
+              fi
+            fi
+          done
+          
+          echo "✅ CloudWatch Log Groups cleanup completed"
+
       - name: Clean Up Network Resources
         id: manual_network_cleanup
         run: |
