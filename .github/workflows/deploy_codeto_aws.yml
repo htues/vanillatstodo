@@ -9,16 +9,17 @@ on:
       - completed
     branches:
       - staging
+      - experimental
   workflow_dispatch:
     inputs:
       environment:
         description: "Environment to deploy to"
         required: true
-        default: "staging"
         type: choice
         options:
           - staging
           - production
+          - experimental
 
 permissions:
   id-token: write
@@ -30,7 +31,7 @@ env:
   CLUSTER_NAME: ${{ github.event.client_payload.cluster_name || 'vanillatstodo-cluster' }}
   AWS_REGION: "us-east-2"
   DOCKER_IMAGE: "hftamayo/vanillatstodo:0.0.1"
-  ENVIRONMENT: ${{ github.event.client_payload.environment || github.event.inputs.environment || 'staging' }}
+  ENVIRONMENT: ${{ github.event.client_payload.environment || github.event.inputs.environment || 'experimental' }}
 
 jobs:
   deploy:
@@ -58,13 +59,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Save Current Deployment
-        run: |
-          if kubectl get deployment vanillatstodo &>/dev/null; then
-            echo "📦 Saving current deployment state..."
-            kubectl get deployment vanillatstodo -o yaml > previous_deployment.yaml
-          fi
-
       - name: Install kubectl
         run: |
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
@@ -89,6 +83,15 @@ jobs:
           aws eks update-kubeconfig \
             --name ${{ env.CLUSTER_NAME }} \
             --region ${{ env.AWS_REGION }}
+
+      - name: Save Current Deployment
+        run: |
+          if kubectl get deployment vanillatstodo &>/dev/null; then
+            echo "📦 Saving current deployment state..."
+            kubectl get deployment vanillatstodo -o yaml > previous_deployment.yaml
+          else
+            echo "ℹ️ No existing deployment found"
+          fi
 
       - name: Create Docker Hub Secret
         run: |
@@ -118,8 +121,8 @@ jobs:
       - name: Deploy to EKS
         run: |
           echo "🚀 Deploying application..."
-          kubectl apply -f k8s/vanillatstodo_deployment.yaml
-          kubectl apply -f k8s/vanillatstodo_service.yaml
+          kubectl apply -f devops/k8s/vanillatstodo_deployment.yml
+          kubectl apply -f devops/k8s/vanillatstodo_service.yml
 
       - name: Wait for Deployment
         run: |
