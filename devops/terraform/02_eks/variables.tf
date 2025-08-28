@@ -79,7 +79,7 @@ variable "log_retention_days" {
 locals {
   # Map experimental to staging role (as per your workflow logic)
   effective_environment = var.environment == "experimental" ? "staging" : var.environment
-  
+
   # Compute cluster role name if not explicitly provided
   computed_cluster_role_name = var.cluster_role_name != null ? var.cluster_role_name : "${local.effective_environment}-${var.project_name}-cluster-role"
 }
