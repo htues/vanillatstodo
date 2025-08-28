@@ -79,15 +79,15 @@ jobs:
             -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="encrypt=true"
-          
+
           # Check if network state exists and has outputs
           echo "🔍 Checking network state availability..."
           NETWORK_STATE_EXISTS=$(aws s3api head-object \
             --bucket ${{ env.BUCKET_NAME }} \
             --key ${{ env.ENVIRONMENT }}/network/terraform.tfstate 2>/dev/null && echo "true" || echo "false")
-          
+
           echo "📊 Network state exists: $NETWORK_STATE_EXISTS"
-          
+
           if [ "$NETWORK_STATE_EXISTS" = "false" ]; then
             echo "⚠️ Network state not found. Checking if EKS resources exist directly..."
             
@@ -165,7 +165,7 @@ jobs:
         id: manual_eks_cleanup
         run: |
           echo "🔍 Checking for any remaining EKS resources..."
-          
+
           # Check for EKS clusters
           CLUSTERS=$(aws eks list-clusters --query "clusters[?contains(@, '${{ env.CLUSTER_NAME }}')]" --output text)
           if [ ! -z "$CLUSTERS" ] && [ "$CLUSTERS" != "None" ]; then
@@ -193,14 +193,14 @@ jobs:
           else
             echo "✅ No EKS clusters found"
           fi
-          
+
           # Check for EKS-related security groups
           echo "🔍 Checking for EKS-related security groups..."
           EKS_SGS=$(aws ec2 describe-security-groups \
             --filters "Name=group-name,Values=*eks*" "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
             --query 'SecurityGroups[*].GroupId' \
             --output text)
-          
+
           if [ ! -z "$EKS_SGS" ] && [ "$EKS_SGS" != "None" ]; then
             echo "🗑️ Found EKS security groups: $EKS_SGS"
             for sg in $EKS_SGS; do
@@ -208,14 +208,14 @@ jobs:
               aws ec2 delete-security-group --group-id $sg || true
             done
           fi
-          
+
           # Check for EKS-related VPC endpoints
           echo "🔍 Checking for EKS-related VPC endpoints..."
           VPC_IDS=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Name,Values=*vanillatstodo*" \
             --query 'Vpcs[*].VpcId' \
             --output text)
-          
+
           for VPC_ID in $VPC_IDS; do
             EKS_ENDPOINTS=$(aws ec2 describe-vpc-endpoints \
               --filters "Name=vpc-id,Values=$VPC_ID" "Name=service-name,Values=com.amazonaws.*.eks" \
@@ -237,10 +237,10 @@ jobs:
         run: |
           echo "⏳ Waiting for EKS resources to be fully deleted..."
           sleep 60
-          
+
           # Check if there are any remaining EKS-related resources
           echo "🔍 Checking for remaining EKS resources..."
-          
+
           # Check for EKS clusters
           CLUSTERS=$(aws eks list-clusters --query "clusters[?contains(@, '${{ env.CLUSTER_NAME }}')]" --output text)
           if [ ! -z "$CLUSTERS" ] && [ "$CLUSTERS" != "None" ]; then
@@ -250,7 +250,7 @@ jobs:
           else
             echo "✅ No remaining EKS clusters found"
           fi
-          
+
           # Check for EKS node groups
           NODE_GROUPS=$(aws eks list-nodegroups --cluster-name ${{ env.CLUSTER_NAME }} --query "nodegroups" --output text 2>/dev/null || echo "")
           if [ ! -z "$NODE_GROUPS" ] && [ "$NODE_GROUPS" != "None" ]; then
@@ -270,22 +270,48 @@ jobs:
             -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="encrypt=true"
-          terraform destroy -auto-approve \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}"
+
+          # Check if EKS cluster still exists before attempting Terraform destroy
+          echo "🔍 Checking if EKS cluster exists before monitoring destruction..."
+          CLUSTER_EXISTS=$(aws eks describe-cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --query 'cluster.name' \
+            --output text 2>/dev/null || echo "false")
+
+          echo "📊 EKS cluster exists: $CLUSTER_EXISTS"
+
+          if [ "$CLUSTER_EXISTS" = "${{ env.CLUSTER_NAME }}" ]; then
+            echo "✅ EKS cluster exists. Proceeding with normal Terraform destroy..."
+            terraform destroy -auto-approve \
+              -var="cluster_name=${{ env.CLUSTER_NAME }}" \
+              -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="project_name=${{ env.PROJECT_NAME }}" \
+              -var="environment=${{ env.ENVIRONMENT }}"
+          else
+            echo "⚠️ EKS cluster not found. Using refresh=false to avoid data source errors..."
+            
+            # Try to destroy without refreshing state (skip data source validation)
+            terraform destroy -auto-approve -refresh=false \
+              -var="cluster_name=${{ env.CLUSTER_NAME }}" \
+              -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="project_name=${{ env.PROJECT_NAME }}" \
+              -var="environment=${{ env.ENVIRONMENT }}" || {
+              echo "⚠️ Terraform destroy failed due to missing EKS cluster. Proceeding with manual cleanup..."
+              echo "MONITORING_TERRAFORM_FAILED=true" >> $GITHUB_ENV
+            }
+          fi
 
       - name: Enhanced Network Dependency Cleanup
         id: enhanced_network_cleanup
         run: |
           echo "🔍 Performing enhanced network dependency cleanup..."
-          
+
           # Find all VPCs with our project tags
           VPC_IDS=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Name,Values=*vanillatstodo*" \
             --query 'Vpcs[*].VpcId' \
             --output text)
-          
+
           for VPC_ID in $VPC_IDS; do
             echo "🔍 Cleaning up dependencies for VPC: $VPC_ID"
             
@@ -433,7 +459,7 @@ jobs:
             
             echo "✅ Completed dependency cleanup for VPC: $VPC_ID"
           done
-          
+
           echo "⏳ Waiting for all resources to be fully deleted..."
           sleep 30
 
@@ -446,7 +472,7 @@ jobs:
             -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="encrypt=true"
-          
+
           # Check for and force unlock any stale locks
           echo "🔓 Checking for stale state locks..."
           if terraform plan -detailed-exitcode >/dev/null 2>&1; then
@@ -464,7 +490,7 @@ jobs:
               terraform force-unlock -force 22adec0c-b380-16f0-1453-8ae8d9bd834f || true
             fi
           fi
-          
+
           echo "🚀 Proceeding with network destruction..."
           terraform destroy -auto-approve \
             -var="aws_region=${{ env.AWS_REGION }}" \
@@ -478,47 +504,78 @@ jobs:
 
           # Delete CloudWatch Dashboard
           echo "🗑️ Deleting CloudWatch Dashboard..."
-          aws cloudwatch delete-dashboards --dashboard-names "${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-${{ env.CLUSTER_NAME }}-dashboard" || true
+          DASHBOARD_NAME="${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-${{ env.CLUSTER_NAME }}-dashboard"
+          if aws cloudwatch describe-dashboards --dashboard-names "$DASHBOARD_NAME" >/dev/null 2>&1; then
+            echo "   ✅ Found dashboard: $DASHBOARD_NAME"
+            aws cloudwatch delete-dashboards --dashboard-names "$DASHBOARD_NAME" || true
+            echo "   ✅ Dashboard deletion completed"
+          else
+            echo "   ℹ️ Dashboard not found: $DASHBOARD_NAME"
+          fi
 
           # Delete CloudWatch Alarms
           echo "🗑️ Deleting CloudWatch Alarms..."
-          ALARMS=$(aws cloudwatch describe-alarms --query "MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')].AlarmName" --output text)
-          if [ ! -z "$ALARMS" ]; then
-            for alarm in $ALARMS; do
-              aws cloudwatch delete-alarms --alarm-names $alarm
+
+          # First try to find alarms by tags (if they exist)
+          TAGGED_ALARMS=$(aws cloudwatch describe-alarms \
+            --query "MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')].AlarmName" \
+            --output text 2>/dev/null || echo "")
+
+          if [ ! -z "$TAGGED_ALARMS" ] && [ "$TAGGED_ALARMS" != "None" ]; then
+            echo "   ✅ Found tagged alarms: $TAGGED_ALARMS"
+            for alarm in $TAGGED_ALARMS; do
+              echo "   🗑️ Deleting alarm: $alarm"
+              aws cloudwatch delete-alarms --alarm-names "$alarm" || true
             done
+          fi
+
+          # Also try to find alarms by name pattern (fallback)
+          PATTERN_ALARMS=$(aws cloudwatch describe-alarms \
+            --query "MetricAlarms[?contains(AlarmName, '${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-${{ env.CLUSTER_NAME }}')].AlarmName" \
+            --output text 2>/dev/null || echo "")
+
+          if [ ! -z "$PATTERN_ALARMS" ] && [ "$PATTERN_ALARMS" != "None" ]; then
+            echo "   ✅ Found pattern-matched alarms: $PATTERN_ALARMS"
+            for alarm in $PATTERN_ALARMS; do
+              echo "   🗑️ Deleting alarm: $alarm"
+              aws cloudwatch delete-alarms --alarm-names "$alarm" || true
+            done
+          fi
+
+          if [ -z "$TAGGED_ALARMS" ] && [ -z "$PATTERN_ALARMS" ]; then
+            echo "   ℹ️ No CloudWatch alarms found"
           fi
 
       - name: Clean Up CloudWatch Log Groups
         id: cloudwatch_logs_cleanup
         run: |
           echo "🔍 Cleaning up CloudWatch Log Groups..."
-          
+
           # List of log groups to clean up
           LOG_GROUPS=(
             "/aws/eks/vanillatstodo-cluster/cluster"
             "/aws/vpc/staging-flow-logs"
           )
-          
+
           # Also check for environment-specific flow logs
           ENV_FLOW_LOGS="/aws/vpc/${{ env.ENVIRONMENT }}-flow-logs"
           LOG_GROUPS+=("$ENV_FLOW_LOGS")
-          
+
           # Also check for any other log groups with our project name
           PROJECT_LOG_GROUPS=$(aws logs describe-log-groups \
             --query "logGroups[?contains(logGroupName, '${{ env.PROJECT_NAME }}')].logGroupName" \
             --output text 2>/dev/null || echo "")
-          
+
           if [ ! -z "$PROJECT_LOG_GROUPS" ] && [ "$PROJECT_LOG_GROUPS" != "None" ]; then
             echo "🔍 Found project-specific log groups: $PROJECT_LOG_GROUPS"
             for log_group in $PROJECT_LOG_GROUPS; do
               LOG_GROUPS+=("$log_group")
             done
           fi
-          
+
           # Remove duplicates and clean up each log group
           UNIQUE_LOG_GROUPS=($(printf "%s\n" "${LOG_GROUPS[@]}" | sort -u))
-          
+
           for log_group in "${UNIQUE_LOG_GROUPS[@]}"; do
             if [ ! -z "$log_group" ]; then
               echo "🗑️ Checking log group: $log_group"
@@ -553,7 +610,7 @@ jobs:
               fi
             fi
           done
-          
+
           echo "✅ CloudWatch Log Groups cleanup completed"
 
       - name: Clean Up Network Resources
@@ -904,7 +961,15 @@ jobs:
           echo "| Resource | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "| -------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
           echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: 1.31 |" >> $GITHUB_STEP_SUMMARY
-          echo "| CloudWatch | ${CLOUDWATCH_STATUS:-❌} | Monitoring |" >> $GITHUB_STEP_SUMMARY
+
+          # Monitoring status based on whether Terraform failed
+          if [ "${MONITORING_TERRAFORM_FAILED:-false}" = "true" ]; then
+            echo "| Monitoring | ⚠️ | Terraform failed, manual cleanup performed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Monitoring | ${MONITORING_STATUS:-✅} | CloudWatch resources |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "| CloudWatch | ${CLOUDWATCH_STATUS:-❌} | Dashboards & Alarms |" >> $GITHUB_STEP_SUMMARY
 
           # Network resources with cleanup details - using correct variable names
           echo "| Network - EIP | ${NETWORK_EIP_STATUS:-❌} | Cleaned: ${EIP_CLEANED:-0} of ${EIP_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
