@@ -332,7 +332,7 @@ jobs:
 
           # Count NAT Gateways
           NAT_COUNT=$(aws ec2 describe-nat-gateways \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --filter "Name=vpc-id,Values=$VPC_ID" \
             --query "length(NatGateways)" \
             --output text)
 
