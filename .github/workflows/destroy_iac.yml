@@ -357,7 +357,6 @@ jobs:
                 else
                   echo "ℹ️ Network interface $eni no longer exists (already cleaned up)"
                 fi
-                fi
               done
             fi
             
