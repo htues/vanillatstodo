@@ -328,7 +328,7 @@ jobs:
               sleep 30
             fi
             
-            # 2. Delete all network interfaces
+            # 2. Delete all network interfaces with proper error handling
             echo "🗑️ Deleting all network interfaces..."
             ENI_IDS=$(aws ec2 describe-network-interfaces \
               --filters "Name=vpc-id,Values=$VPC_ID" \
@@ -338,7 +338,8 @@ jobs:
             if [ ! -z "$ENI_IDS" ] && [ "$ENI_IDS" != "None" ]; then
               echo "🗑️ Found network interfaces: $ENI_IDS"
               for eni in $ENI_IDS; do
-                # Check if ENI still exists before trying to get its status
+                echo "🔍 Checking network interface: $eni"
+                # Check if ENI still exists
                 if aws ec2 describe-network-interfaces --network-interface-ids $eni >/dev/null 2>&1; then
                   ENI_STATUS=$(aws ec2 describe-network-interfaces \
                     --network-interface-ids $eni \
