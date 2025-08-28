@@ -12,7 +12,7 @@ variable "kubernetes_version" {
 variable "environment" {
   description = "Environment identifier for resource tagging and naming"
   type        = string
-  default     = "staging"
+  default     = "experimental"
 
   validation {
     condition     = contains(["staging", "production", "experimental"], var.environment)
@@ -53,6 +53,17 @@ variable "cluster_name" {
   }
 }
 
+variable "cluster_role_name" {
+  description = "The name of the IAM role for the EKS cluster"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.cluster_role_name == null || can(regex("^[a-zA-Z0-9_-]+$", var.cluster_role_name))
+    error_message = "Cluster role name must contain only letters, numbers, hyphens, and underscores"
+  }
+}
+
 variable "log_retention_days" {
   description = "Number of days to retain EKS cluster CloudWatch logs"
   type        = number
@@ -62,4 +73,13 @@ variable "log_retention_days" {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.log_retention_days)
     error_message = "Log retention must be one of the allowed CloudWatch values"
   }
+}
+
+# Local variable to compute the cluster role name based on environment
+locals {
+  # Map experimental to staging role (as per your workflow logic)
+  effective_environment = var.environment == "experimental" ? "staging" : var.environment
+  
+  # Compute cluster role name if not explicitly provided
+  computed_cluster_role_name = var.cluster_role_name != null ? var.cluster_role_name : "${local.effective_environment}-${var.project_name}-cluster-role"
 }

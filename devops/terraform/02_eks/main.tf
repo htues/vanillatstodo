@@ -1,15 +1,6 @@
 # Use data source to reference existing role
 data "aws_iam_role" "eks_cluster" {
-  name = "${var.environment}-${var.cluster_name}-role"
-}
-
-data "terraform_remote_state" "network" {
-  backend = "s3"
-  config = {
-    bucket = "vanillatstodo-terraform-state"
-    key    = "staging/network.tfstate"
-    region = "us-east-2"
-  }
+  name = local.computed_cluster_role_name
 }
 
 # Local variables
@@ -29,7 +20,7 @@ locals {
 
 # Security group for EKS
 resource "aws_security_group" "eks_cluster" {
-  name        = "${var.project_name}-eks-cluster-sg"
+  name        = "${var.environment}-${var.project_name}-eks-cluster-sg"
   description = "Security group for EKS cluster"
   vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
 
@@ -41,7 +32,7 @@ resource "aws_security_group" "eks_cluster" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.cluster_name}-sg"
+    Name = "${var.environment}-${var.project_name}-${var.cluster_name}-sg"
   })
 }
 
@@ -54,14 +45,14 @@ resource "aws_eks_cluster" "main" {
   enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
   vpc_config {
-    subnet_ids              = data.terraform_remote_state.network.outputs.subnet_ids
+    subnet_ids              = local.all_subnets
     endpoint_private_access = true
     endpoint_public_access  = true
     security_group_ids      = [aws_security_group.eks_cluster.id]
   }
 
   tags = merge(local.common_tags, {
-    Name    = "${var.project_name}-${var.cluster_name}"
+    Name    = "${var.environment}-${var.project_name}-${var.cluster_name}"
     Version = "1.31"
   })
 }

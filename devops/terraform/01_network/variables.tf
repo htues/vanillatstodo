@@ -10,13 +10,13 @@ variable "aws_region" {
 }
 
 variable "environment" {
-  description = "Environment name for the infrastructure"
+  description = "Environment identifier for resource tagging and naming"
   type        = string
-  default     = "staging"
+  default     = "experimental"
 
   validation {
     condition     = contains(["staging", "production", "experimental"], var.environment)
-    error_message = "Environment must be either 'staging', 'production', or 'experimental'."
+    error_message = "Environment must be 'staging', 'production', or 'experimental'"
   }
 }
 
@@ -84,16 +84,6 @@ variable "vpc_flow_log_retention" {
   validation {
     condition     = var.vpc_flow_log_retention >= 1 && var.vpc_flow_log_retention <= 365
     error_message = "VPC flow log retention must be between 1 and 365 days."
-  }
-}
-
-variable "tags" {
-  description = "Common tags for all resources"
-  type        = map(string)
-  default = {
-    Project     = "vanillatstodo"
-    ManagedBy   = "terraform"
-    Environment = "staging"
   }
 }
 

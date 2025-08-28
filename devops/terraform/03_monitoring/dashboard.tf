@@ -1,6 +1,6 @@
 # CloudWatch Dashboard for EKS
 resource "aws_cloudwatch_dashboard" "eks" {
-  dashboard_name = "${var.project_name}-${var.cluster_name}-dashboard"
+  dashboard_name = "${var.project_name}-${var.environment}-${var.cluster_name}-dashboard"
 
   dashboard_body = jsonencode({
     widgets = [
@@ -40,9 +40,5 @@ resource "aws_cloudwatch_dashboard" "eks" {
         }
       }
     ]
-  })
-
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.cluster_name}-dashboard"
   })
 }
