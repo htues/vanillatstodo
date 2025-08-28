@@ -338,16 +338,25 @@ jobs:
             if [ ! -z "$ENI_IDS" ] && [ "$ENI_IDS" != "None" ]; then
               echo "🗑️ Found network interfaces: $ENI_IDS"
               for eni in $ENI_IDS; do
-                ENI_STATUS=$(aws ec2 describe-network-interfaces \
-                  --network-interface-ids $eni \
-                  --query 'NetworkInterfaces[0].Status' \
-                  --output text)
-                if [ "$ENI_STATUS" = "available" ]; then
-                  echo "🗑️ Deleting available network interface: $eni"
-                  aws ec2 delete-network-interface --network-interface-id $eni || true
-                  sleep 5
+                # Check if ENI still exists before trying to get its status
+                if aws ec2 describe-network-interfaces --network-interface-ids $eni >/dev/null 2>&1; then
+                  ENI_STATUS=$(aws ec2 describe-network-interfaces \
+                    --network-interface-ids $eni \
+                    --query 'NetworkInterfaces[0].Status' \
+                    --output text 2>/dev/null || echo "not-found")
+                  
+                  if [ "$ENI_STATUS" = "available" ]; then
+                    echo "🗑️ Deleting available network interface: $eni"
+                    aws ec2 delete-network-interface --network-interface-id $eni || true
+                    sleep 3
+                  elif [ "$ENI_STATUS" = "not-found" ]; then
+                    echo "ℹ️ Network interface $eni already deleted"
+                  else
+                    echo "⚠️ Network interface $eni is not available (status: $ENI_STATUS)"
+                  fi
                 else
-                  echo "⚠️ Network interface $eni is not available (status: $ENI_STATUS)"
+                  echo "ℹ️ Network interface $eni no longer exists (already cleaned up)"
+                fi
                 fi
               done
             fi
@@ -724,14 +733,27 @@ jobs:
             
             for eni in $ENI_IDS; do
               ((TOTAL_COUNT["INTERFACES"]++))
-              if aws ec2 describe-network-interfaces \
-                --network-interface-ids $eni \
-                --query 'NetworkInterfaces[0].Status' \
-                --output text | grep -q "available"; then
-                echo "   Deleting Network Interface: $eni"
-                if aws ec2 delete-network-interface --network-interface-id $eni; then
+              # Check if ENI still exists before checking status
+              if aws ec2 describe-network-interfaces --network-interface-ids $eni >/dev/null 2>&1; then
+                ENI_STATUS=$(aws ec2 describe-network-interfaces \
+                  --network-interface-ids $eni \
+                  --query 'NetworkInterfaces[0].Status' \
+                  --output text 2>/dev/null || echo "not-found")
+                
+                if [ "$ENI_STATUS" = "available" ]; then
+                  echo "   Deleting Network Interface: $eni"
+                  if aws ec2 delete-network-interface --network-interface-id $eni; then
+                    ((CLEANED_COUNT["INTERFACES"]++))
+                  fi
+                elif [ "$ENI_STATUS" = "not-found" ]; then
+                  echo "   ℹ️ Network Interface $eni already deleted"
                   ((CLEANED_COUNT["INTERFACES"]++))
+                else
+                  echo "   ⚠️ Network Interface $eni is not available (status: $ENI_STATUS)"
                 fi
+              else
+                echo "   ℹ️ Network Interface $eni no longer exists (already cleaned up)"
+                ((CLEANED_COUNT["INTERFACES"]++))
               fi
               sleep 2
             done
