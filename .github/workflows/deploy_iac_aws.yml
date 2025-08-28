@@ -351,17 +351,17 @@ jobs:
 
           # Count EKS Clusters
           EKS_COUNT=$(aws eks list-clusters \
-            --query "length(clusters[?contains(@, '${{ env.CLUSTER_NAME }}')])" \
+            --query "length(clusters[?@ && contains(@, '${{ env.CLUSTER_NAME }}')])" \
             --output text)
 
           # Count CloudWatch Dashboards
           DASHBOARD_COUNT=$(aws cloudwatch list-dashboards \
-            --query "length(DashboardEntries[?contains(DashboardName, '${{ env.PROJECT_NAME }}') && contains(DashboardName, '${{ env.ENVIRONMENT }}')])" \
+            --query "length(DashboardEntries[?DashboardName && contains(DashboardName, '${{ env.PROJECT_NAME }}') && contains(DashboardName, '${{ env.ENVIRONMENT }}')])" \
             --output text)
 
-          # Count CloudWatch Alarms
+          # Count CloudWatch Alarms  
           ALARM_COUNT=$(aws cloudwatch describe-alarms \
-            --query "length(MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')])" \
+            --query "length(MetricAlarms[?Tags && length(Tags[?Key=='Project' && Value=='${{ env.PROJECT_NAME }}']) > \`0\` && length(Tags[?Key=='Environment' && Value=='${{ env.ENVIRONMENT }}']) > \`0\`])" \
             --output text)
 
           # Store counts in environment variables
