@@ -159,26 +159,26 @@ jobs:
         id: verify_eks
         run: |
           echo "🔍 Verifying EKS deployment..."
-          
+
           # Wait for cluster to be active
           echo "⏳ Waiting for cluster to be active..."
           aws eks wait cluster-active --name ${{ env.CLUSTER_NAME }}
-          
+
           # Get cluster endpoint
           CLUSTER_ENDPOINT=$(aws eks describe-cluster \
             --name ${{ env.CLUSTER_NAME }} \
             --query "cluster.endpoint" \
             --output text)
-          
+
           # Get cluster status
           CLUSTER_STATUS=$(aws eks describe-cluster \
             --name ${{ env.CLUSTER_NAME }} \
             --query "cluster.status" \
             --output text)
-          
+
           echo "CLUSTER_ENDPOINT=$CLUSTER_ENDPOINT" >> $GITHUB_ENV
           echo "CLUSTER_STATUS=$CLUSTER_STATUS" >> $GITHUB_ENV
-          
+
           if [ "$CLUSTER_STATUS" = "ACTIVE" ]; then
             echo "✅ EKS cluster is active"
             echo "CLUSTER_VERIFIED=true" >> $GITHUB_ENV
@@ -192,26 +192,26 @@ jobs:
         id: verify_network
         run: |
           echo "🔍 Verifying network resources..."
-          
+
           # Check VPC
           VPC_ID=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
                      "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
             --query "Vpcs[0].VpcId" \
             --output text)
-          
+
           if [ "$VPC_ID" != "None" ]; then
             echo "✅ VPC found: $VPC_ID"
           else
             echo "❌ VPC not found"
             exit 1
           fi
-          
+
           # Check subnets
           SUBNET_COUNT=$(aws ec2 describe-subnets \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query "length(Subnets)")
-          
+
           if [ "$SUBNET_COUNT" -ge 4 ]; then
             echo "✅ Found $SUBNET_COUNT subnets"
           else
@@ -223,30 +223,51 @@ jobs:
         id: verify_monitoring
         run: |
           echo "🔍 Verifying monitoring resources..."
-          
-          # Check CloudWatch Dashboard
+
+          # Check CloudWatch Dashboard with correct naming pattern
+          DASHBOARD_NAME="${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-${{ env.CLUSTER_NAME }}-dashboard"
+          echo "🔍 Looking for dashboard: $DASHBOARD_NAME"
+
           DASHBOARD=$(aws cloudwatch get-dashboard \
-            --dashboard-name "${{ env.PROJECT_NAME }}-dashboard" \
+            --dashboard-name "$DASHBOARD_NAME" \
             --query "DashboardBody" \
             --output text 2>/dev/null || echo "None")
-          
+
           if [ "$DASHBOARD" != "None" ]; then
-            echo "✅ CloudWatch Dashboard found"
+            echo "✅ CloudWatch Dashboard found: $DASHBOARD_NAME"
           else
-            echo "❌ CloudWatch Dashboard not found"
+            echo "❌ CloudWatch Dashboard not found: $DASHBOARD_NAME"
+            
+            # List all dashboards for debugging
+            echo "🔍 Available dashboards:"
+            aws cloudwatch list-dashboards --query "DashboardEntries[*].DashboardName" --output table || true
             exit 1
           fi
-          
-          # Check CloudWatch Alarms
+
+          # Check CloudWatch Alarms with better error handling
+          echo "🔍 Checking CloudWatch Alarms..."
           ALARM_COUNT=$(aws cloudwatch describe-alarms \
             --query "length(MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')])" \
-            --output text)
-          
+            --output text 2>/dev/null || echo "0")
+
           if [ "$ALARM_COUNT" -gt 0 ]; then
             echo "✅ Found $ALARM_COUNT CloudWatch Alarms"
           else
-            echo "❌ No CloudWatch Alarms found"
-            exit 1
+            echo "⚠️ No CloudWatch Alarms found with tags"
+            
+            # Try alternative search by name pattern
+            PATTERN_ALARMS=$(aws cloudwatch describe-alarms \
+              --query "MetricAlarms[?contains(AlarmName, '${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-${{ env.CLUSTER_NAME }}')]" \
+              --output text 2>/dev/null || echo "")
+            
+            if [ ! -z "$PATTERN_ALARMS" ] && [ "$PATTERN_ALARMS" != "None" ]; then
+              echo "✅ Found alarms by name pattern"
+            else
+              echo "❌ No CloudWatch Alarms found"
+              echo "🔍 Available alarms:"
+              aws cloudwatch describe-alarms --query "MetricAlarms[*].AlarmName" --output table || true
+              exit 1
+            fi
           fi
 
       - name: Export EKS Details
@@ -264,85 +285,85 @@ jobs:
         if: success()
         run: |
           echo "🔍 Generating comprehensive resource summary..."
-          
+
           # Get VPC ID for filtering
           VPC_ID=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
                      "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
             --query "Vpcs[0].VpcId" \
             --output text)
-          
+
           if [ "$VPC_ID" = "None" ] || [ -z "$VPC_ID" ]; then
             echo "❌ VPC not found for resource counting"
             exit 1
           fi
-          
+
           echo "📊 VPC ID: $VPC_ID"
-          
+
           # Count Subnets
           SUBNET_COUNT=$(aws ec2 describe-subnets \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query "length(Subnets)" \
             --output text)
-          
+
           # Count Route Tables
           RT_COUNT=$(aws ec2 describe-route-tables \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query "length(RouteTables)" \
             --output text)
-          
+
           # Count Internet Gateways
           IGW_COUNT=$(aws ec2 describe-internet-gateways \
             --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
             --query "length(InternetGateways)" \
             --output text)
-          
+
           # Count VPC Endpoints
           ENDPOINT_COUNT=$(aws ec2 describe-vpc-endpoints \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query "length(VpcEndpoints)" \
             --output text)
-          
+
           # Count Security Groups
           SG_COUNT=$(aws ec2 describe-security-groups \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query "length(SecurityGroups)" \
             --output text)
-          
+
           # Count NAT Gateways
           NAT_COUNT=$(aws ec2 describe-nat-gateways \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query "length(NatGateways)" \
             --output text)
-          
+
           # Count EIPs
           EIP_COUNT=$(aws ec2 describe-addresses \
             --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
                      "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
             --query "length(Addresses)" \
             --output text)
-          
+
           # Count Network ACLs
           NACL_COUNT=$(aws ec2 describe-network-acls \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query "length(NetworkAcls)" \
             --output text)
-          
+
           # Count EKS Clusters
           EKS_COUNT=$(aws eks list-clusters \
             --query "length(clusters[?contains(@, '${{ env.CLUSTER_NAME }}')])" \
             --output text)
-          
+
           # Count CloudWatch Dashboards
           DASHBOARD_COUNT=$(aws cloudwatch list-dashboards \
             --query "length(DashboardEntries[?contains(DashboardName, '${{ env.PROJECT_NAME }}') && contains(DashboardName, '${{ env.ENVIRONMENT }}')])" \
             --output text)
-          
+
           # Count CloudWatch Alarms
           ALARM_COUNT=$(aws cloudwatch describe-alarms \
             --query "length(MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')])" \
             --output text)
-          
+
           # Store counts in environment variables
           echo "SUBNET_COUNT=$SUBNET_COUNT" >> $GITHUB_ENV
           echo "RT_COUNT=$RT_COUNT" >> $GITHUB_ENV
@@ -355,11 +376,11 @@ jobs:
           echo "EKS_COUNT=$EKS_COUNT" >> $GITHUB_ENV
           echo "DASHBOARD_COUNT=$DASHBOARD_COUNT" >> $GITHUB_ENV
           echo "ALARM_COUNT=$ALARM_COUNT" >> $GITHUB_ENV
-          
+
           # Calculate total resources
           TOTAL_RESOURCES=$((SUBNET_COUNT + RT_COUNT + IGW_COUNT + ENDPOINT_COUNT + SG_COUNT + NAT_COUNT + EIP_COUNT + NACL_COUNT + EKS_COUNT + DASHBOARD_COUNT + ALARM_COUNT))
           echo "TOTAL_RESOURCES=$TOTAL_RESOURCES" >> $GITHUB_ENV
-          
+
           echo "✅ Resource counting completed!"
 
       - name: Display Resource Summary
@@ -372,7 +393,7 @@ jobs:
           echo "**Region:** \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Timestamp:** \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### 📊 Resource Counts" >> $GITHUB_STEP_SUMMARY
           echo "| Resource Type | Count | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---------------|-------|--------|" >> $GITHUB_STEP_SUMMARY
@@ -389,7 +410,7 @@ jobs:
           echo "| **CloudWatch Dashboards** | ${{ env.DASHBOARD_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| **CloudWatch Alarms** | ${{ env.ALARM_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### 🔗 EKS Cluster Details" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -398,7 +419,7 @@ jobs:
           echo "| **Cluster Endpoint** | \`${{ env.CLUSTER_ENDPOINT }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Kubernetes Version** | \`1.31\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### 🎯 Deployment Status" >> $GITHUB_STEP_SUMMARY
           if [ "${{ env.CLUSTER_VERIFIED }}" = "true" ]; then
             echo "**Status:** ✅ **SUCCESS** - All resources deployed successfully!" >> $GITHUB_STEP_SUMMARY
@@ -406,7 +427,7 @@ jobs:
             echo "**Status:** ❌ **FAILED** - Some resources failed to deploy" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
           echo "- Terraform Version: \`${{ env.TF_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- AWS Region: \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
