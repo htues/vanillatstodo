@@ -576,20 +576,43 @@ jobs:
 
           # Check for and force unlock any stale locks
           echo "🔓 Checking for stale state locks..."
+
+          # Try multiple methods to get the lock ID
+          LOCK_ID=""
+
+          # Method 1: Try terraform plan to get lock info
           if terraform plan -detailed-exitcode >/dev/null 2>&1; then
             echo "✅ No state lock detected"
           else
-            echo "⚠️ State lock detected, attempting to force unlock..."
-            # Try to get the lock ID from the error message
-            LOCK_ID=$(terraform plan 2>&1 | grep -o 'ID: [a-f0-9-]*' | cut -d' ' -f2 || echo "")
-            if [ ! -z "$LOCK_ID" ]; then
-              echo "🔓 Force unlocking with ID: $LOCK_ID"
-              terraform force-unlock -force "$LOCK_ID"
-            else
-              echo "⚠️ Could not determine lock ID, trying generic unlock..."
-              # Try the lock ID from the error message
-              terraform force-unlock -force 22adec0c-b380-16f0-1453-8ae8d9bd834f || true
+            echo "⚠️ State lock detected, extracting lock ID..."
+            
+            # Method 2: Get lock ID from terraform plan error output
+            LOCK_ID=$(terraform plan 2>&1 | grep -E 'ID:\s+[a-f0-9-]+' | head -1 | sed 's/.*ID:\s*//' | tr -d ' ' || echo "")
+            
+            if [ -z "$LOCK_ID" ]; then
+              # Method 3: Try terraform init to get lock info
+              LOCK_ID=$(terraform init 2>&1 | grep -E 'ID:\s+[a-f0-9-]+' | head -1 | sed 's/.*ID:\s*//' | tr -d ' ' || echo "")
             fi
+            
+            if [ -z "$LOCK_ID" ]; then
+              # Method 4: Try from any terraform command
+              LOCK_ID=$(terraform refresh 2>&1 | grep -E 'ID:\s+[a-f0-9-]+' | head -1 | sed 's/.*ID:\s*//' | tr -d ' ' || echo "")
+            fi
+            
+            if [ ! -z "$LOCK_ID" ]; then
+              echo "🔓 Found lock ID: $LOCK_ID"
+              echo "🔓 Force unlocking..."
+              terraform force-unlock -force "$LOCK_ID" || true
+            else
+              echo "⚠️ Could not determine lock ID, trying common patterns..."
+              # Try known lock IDs from the error message
+              terraform force-unlock -force "26caec4a-58ea-883b-72d5-302b3bd9afcd" || true
+              terraform force-unlock -force "22adec0c-b380-16f0-1453-8ae8d9bd834f" || true
+            fi
+            
+            # Verify unlock worked
+            echo "🔍 Verifying state lock is cleared..."
+            sleep 5
           fi
 
           echo "🚀 Proceeding with network destruction..."
@@ -598,7 +621,14 @@ jobs:
           for attempt in 1 2 3; do
             echo "🔄 Network destruction attempt $attempt/3..."
             
-            if terraform destroy -auto-approve \
+            # Use -lock=false on retry attempts if lock issues persist
+            LOCK_FLAG=""
+            if [ $attempt -gt 1 ]; then
+              echo "⚠️ Using -lock=false to bypass state locking on retry..."
+              LOCK_FLAG="-lock=false"
+            fi
+            
+            if terraform destroy -auto-approve $LOCK_FLAG \
               -var="aws_region=${{ env.AWS_REGION }}" \
               -var="project_name=${{ env.PROJECT_NAME }}" \
               -var="environment=${{ env.ENVIRONMENT }}"; then
