@@ -4,7 +4,7 @@ metadata:
   name: vanillatstodo
   labels:
     app: vanillatstodo
-    environment: staging
+    environment: experimental
     version: "0.0.1"
 spec:
   replicas: 2
@@ -40,19 +40,19 @@ spec:
               memory: "256Mi"
           readinessProbe:
             httpGet:
-              path: /health
+              path: /
               port: 80
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /
               port: 80
             initialDelaySeconds: 15
             periodSeconds: 20
           env:
             - name: NODE_ENV
-              value: "production"
+              value: "experimental"
       imagePullSecrets:
         - name: regcred
       securityContext:

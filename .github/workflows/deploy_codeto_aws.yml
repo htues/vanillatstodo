@@ -1,24 +1,18 @@
 name: Deploy to AWS EKS
 
 on:
-  repository_dispatch:
-    types: [start-eks-deployment]
-  workflow_run:
-    workflows: ["Deploy Infrastructure"]
-    types:
-      - completed
-    branches:
-      - staging
+  # Remove automatic triggers - Manual only
   workflow_dispatch:
     inputs:
       environment:
         description: "Environment to deploy to"
         required: true
-        default: "staging"
+        default: "experimental"
         type: choice
         options:
           - staging
           - production
+          - experimental
 
 permissions:
   id-token: write
@@ -30,17 +24,15 @@ env:
   CLUSTER_NAME: ${{ github.event.client_payload.cluster_name || 'vanillatstodo-cluster' }}
   AWS_REGION: "us-east-2"
   DOCKER_IMAGE: "hftamayo/vanillatstodo:0.0.1"
-  ENVIRONMENT: ${{ github.event.client_payload.environment || github.event.inputs.environment || 'staging' }}
+  ENVIRONMENT: ${{ github.event.client_payload.environment || github.event.inputs.environment || 'experimental' }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'repository_dispatch' ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    # Only run on manual dispatch
+    if: github.event_name == 'workflow_dispatch'
     environment:
-      name: ${{ env.ENVIRONMENT }}
+      name: ${{ github.event.client_payload.environment || github.event.inputs.environment || 'experimental' }}
       url: ${{ env.SERVICE_URL }}
 
     steps:
@@ -58,13 +50,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Save Current Deployment
-        run: |
-          if kubectl get deployment vanillatstodo &>/dev/null; then
-            echo "📦 Saving current deployment state..."
-            kubectl get deployment vanillatstodo -o yaml > previous_deployment.yaml
-          fi
-
       - name: Install kubectl
         run: |
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
@@ -81,7 +66,11 @@ jobs:
           echo "✅ EKS cluster verified"
 
           # Store cluster endpoint for later use
-          CLUSTER_ENDPOINT=${{ github.event.client_payload.cluster_endpoint || $(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.endpoint" --output text) }}
+          if [ -n "${{ github.event.client_payload.cluster_endpoint }}" ]; then
+            CLUSTER_ENDPOINT="${{ github.event.client_payload.cluster_endpoint }}"
+          else
+            CLUSTER_ENDPOINT=$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.endpoint" --output text)
+          fi
           echo "CLUSTER_ENDPOINT=${CLUSTER_ENDPOINT}" >> $GITHUB_ENV
 
       - name: Update kubeconfig
@@ -89,6 +78,15 @@ jobs:
           aws eks update-kubeconfig \
             --name ${{ env.CLUSTER_NAME }} \
             --region ${{ env.AWS_REGION }}
+
+      - name: Save Current Deployment
+        run: |
+          if kubectl get deployment vanillatstodo &>/dev/null; then
+            echo "📦 Saving current deployment state..."
+            kubectl get deployment vanillatstodo -o yaml > previous_deployment.yaml
+          else
+            echo "ℹ️ No existing deployment found"
+          fi
 
       - name: Create Docker Hub Secret
         run: |
@@ -118,8 +116,8 @@ jobs:
       - name: Deploy to EKS
         run: |
           echo "🚀 Deploying application..."
-          kubectl apply -f k8s/vanillatstodo_deployment.yaml
-          kubectl apply -f k8s/vanillatstodo_service.yaml
+          kubectl apply -f devops/k8s/vanillatstodo_deployment.yml
+          kubectl apply -f devops/k8s/vanillatstodo_service.yml
 
       - name: Wait for Deployment
         run: |
@@ -151,7 +149,7 @@ jobs:
         run: |
           echo "⏳ Checking application health..."
           for i in {1..10}; do
-            if curl -sf ${SERVICE_URL}/health; then
+            if curl -sf "http://${SERVICE_URL}/"; then
               echo "✅ Application is healthy"
               echo "health_status=healthy" >> $GITHUB_OUTPUT
               break
