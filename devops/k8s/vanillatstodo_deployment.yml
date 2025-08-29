@@ -56,6 +56,7 @@ spec:
               value: "experimental"
       imagePullSecrets:
         - name: regcred
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
+      # Temporarily commented out security context for debugging
+      # securityContext:
+      #   runAsNonRoot: true
+      #   runAsUser: 1000
