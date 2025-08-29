@@ -472,6 +472,98 @@ jobs:
           echo "⏳ Waiting for all resources to be fully deleted..."
           sleep 30
 
+      - name: Clean AWS Dependencies Before Network Destruction
+        id: aws_dependencies_cleanup
+        run: |
+          echo "🧹 Cleaning AWS dependencies that block network destruction..."
+
+          # 1. Delete Load Balancers in the VPC
+          echo "🔍 Finding Load Balancers..."
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+            --query "Vpcs[0].VpcId" --output text 2>/dev/null || echo "None")
+
+          if [ "$VPC_ID" != "None" ] && [ "$VPC_ID" != "null" ] && [ ! -z "$VPC_ID" ]; then
+            echo "✅ Found VPC: $VPC_ID"
+            
+            # Delete Classic Load Balancers
+            echo "🗑️ Deleting Classic Load Balancers..."
+            CLASSIC_LBS=$(aws elb describe-load-balancers \
+              --query "LoadBalancerDescriptions[?VPCId=='$VPC_ID'].LoadBalancerName" \
+              --output text 2>/dev/null || echo "")
+            
+            if [ ! -z "$CLASSIC_LBS" ] && [ "$CLASSIC_LBS" != "None" ]; then
+              for lb in $CLASSIC_LBS; do
+                echo "   🗑️ Deleting Classic LB: $lb"
+                aws elb delete-load-balancer --load-balancer-name "$lb" || true
+              done
+            fi
+            
+            # Delete Application/Network Load Balancers
+            echo "🗑️ Deleting ALB/NLB Load Balancers..."
+            ALB_ARNS=$(aws elbv2 describe-load-balancers \
+              --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
+              --output text 2>/dev/null || echo "")
+            
+            if [ ! -z "$ALB_ARNS" ] && [ "$ALB_ARNS" != "None" ]; then
+              for arn in $ALB_ARNS; do
+                echo "   🗑️ Deleting ALB/NLB: $arn"
+                aws elbv2 delete-load-balancer --load-balancer-arn "$arn" || true
+              done
+            fi
+            
+            # Wait for LBs to be deleted
+            echo "⏳ Waiting for Load Balancers to be deleted..."
+            sleep 60
+            
+            # 2. Delete NAT Gateway EIPs
+            echo "🗑️ Releasing NAT Gateway Elastic IPs..."
+            EIP_ALLOCS=$(aws ec2 describe-addresses \
+              --filters "Name=domain,Values=vpc" \
+              --query "Addresses[?AssociationId!=null].AllocationId" \
+              --output text 2>/dev/null || echo "")
+            
+            if [ ! -z "$EIP_ALLOCS" ] && [ "$EIP_ALLOCS" != "None" ]; then
+              for alloc in $EIP_ALLOCS; do
+                echo "   🗑️ Releasing EIP: $alloc"
+                aws ec2 release-address --allocation-id "$alloc" || true
+              done
+            fi
+            
+            # 3. Force delete Network Interfaces
+            echo "🗑️ Deleting Network Interfaces..."
+            ENI_IDS=$(aws ec2 describe-network-interfaces \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=status,Values=available" \
+              --query "NetworkInterfaces[].NetworkInterfaceId" \
+              --output text 2>/dev/null || echo "")
+            
+            if [ ! -z "$ENI_IDS" ] && [ "$ENI_IDS" != "None" ]; then
+              for eni in $ENI_IDS; do
+                echo "   🗑️ Deleting ENI: $eni"
+                aws ec2 delete-network-interface --network-interface-id "$eni" || true
+              done
+            fi
+            
+            # 4. Delete Security Groups (except default)
+            echo "🗑️ Deleting Security Groups..."
+            SG_IDS=$(aws ec2 describe-security-groups \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query "SecurityGroups[?GroupName!='default'].GroupId" \
+              --output text 2>/dev/null || echo "")
+            
+            if [ ! -z "$SG_IDS" ] && [ "$SG_IDS" != "None" ]; then
+              for sg in $SG_IDS; do
+                echo "   🗑️ Deleting Security Group: $sg"
+                aws ec2 delete-security-group --group-id "$sg" || true
+              done
+            fi
+            
+            echo "⏳ Waiting for dependencies to clear..."
+            sleep 30
+          else
+            echo "ℹ️ No VPC found, skipping dependency cleanup"
+          fi
+
       - name: Destroy Network Resources
         id: network_cleanup
         run: |
@@ -501,10 +593,49 @@ jobs:
           fi
 
           echo "🚀 Proceeding with network destruction..."
-          terraform destroy -auto-approve \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}"
+
+          # Retry logic for network destruction
+          for attempt in 1 2 3; do
+            echo "🔄 Network destruction attempt $attempt/3..."
+            
+            if terraform destroy -auto-approve \
+              -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="project_name=${{ env.PROJECT_NAME }}" \
+              -var="environment=${{ env.ENVIRONMENT }}"; then
+              echo "✅ Network destruction successful!"
+              break
+            else
+              echo "❌ Network destruction failed on attempt $attempt"
+              
+              if [ $attempt -lt 3 ]; then
+                echo "⏳ Waiting before retry..."
+                sleep 60
+                
+                # Try to clean more dependencies
+                echo "🧹 Additional dependency cleanup..."
+                VPC_ID=$(aws ec2 describe-vpcs \
+                  --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+                  --query "Vpcs[0].VpcId" --output text 2>/dev/null || echo "None")
+                
+                if [ "$VPC_ID" != "None" ] && [ "$VPC_ID" != "null" ] && [ ! -z "$VPC_ID" ]; then
+                  # Force delete any remaining ENIs
+                  aws ec2 describe-network-interfaces \
+                    --filters "Name=vpc-id,Values=$VPC_ID" \
+                    --query "NetworkInterfaces[].NetworkInterfaceId" \
+                    --output text 2>/dev/null | xargs -n1 -I {} aws ec2 delete-network-interface --network-interface-id {} || true
+                  
+                  # Release any remaining EIPs
+                  aws ec2 describe-addresses \
+                    --filters "Name=domain,Values=vpc" \
+                    --query "Addresses[].AllocationId" \
+                    --output text 2>/dev/null | xargs -n1 -I {} aws ec2 release-address --allocation-id {} || true
+                fi
+              else
+                echo "❌ All network destruction attempts failed"
+                exit 1
+              fi
+            fi
+          done
 
       - name: Clean Up CloudWatch Resources
         id: cloudwatch_cleanup
