@@ -4,7 +4,7 @@ on:
   repository_dispatch:
     types: [start-eks-deployment]
   workflow_run:
-    workflows: ["Deploy Infrastructure"]
+    workflows: ["Deploy IaC Resources"]
     types:
       - completed
     branches:
@@ -15,6 +15,7 @@ on:
       environment:
         description: "Environment to deploy to"
         required: true
+        default: "experimental"
         type: choice
         options:
           - staging
