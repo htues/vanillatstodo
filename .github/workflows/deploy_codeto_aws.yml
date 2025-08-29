@@ -1,15 +1,7 @@
 name: Deploy to AWS EKS
 
 on:
-  repository_dispatch:
-    types: [start-eks-deployment]
-  workflow_run:
-    workflows: ["Deploy IaC Resources"]
-    types:
-      - completed
-    branches:
-      - staging
-      - experimental
+  # Remove automatic triggers - Manual only
   workflow_dispatch:
     inputs:
       environment:
@@ -37,12 +29,10 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'repository_dispatch' ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    # Only run on manual dispatch
+    if: github.event_name == 'workflow_dispatch'
     environment:
-      name: ${{ env.ENVIRONMENT }}
+      name: ${{ github.event.client_payload.environment || github.event.inputs.environment || 'experimental' }}
       url: ${{ env.SERVICE_URL }}
 
     steps:
@@ -76,7 +66,11 @@ jobs:
           echo "✅ EKS cluster verified"
 
           # Store cluster endpoint for later use
-          CLUSTER_ENDPOINT=${{ github.event.client_payload.cluster_endpoint || $(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.endpoint" --output text) }}
+          if [ -n "${{ github.event.client_payload.cluster_endpoint }}" ]; then
+            CLUSTER_ENDPOINT="${{ github.event.client_payload.cluster_endpoint }}"
+          else
+            CLUSTER_ENDPOINT=$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.endpoint" --output text)
+          fi
           echo "CLUSTER_ENDPOINT=${CLUSTER_ENDPOINT}" >> $GITHUB_ENV
 
       - name: Update kubeconfig
