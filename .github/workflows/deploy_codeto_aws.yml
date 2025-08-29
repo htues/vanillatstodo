@@ -149,7 +149,7 @@ jobs:
         run: |
           echo "⏳ Checking application health..."
           for i in {1..10}; do
-            if curl -sf ${SERVICE_URL}/health; then
+            if curl -sf "http://${SERVICE_URL}/"; then
               echo "✅ Application is healthy"
               echo "health_status=healthy" >> $GITHUB_OUTPUT
               break
