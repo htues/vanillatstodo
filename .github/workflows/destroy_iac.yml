@@ -161,6 +161,82 @@ jobs:
             fi
           fi
 
+      - name: Clean Kubernetes-Managed AWS Resources
+        id: k8s_resources_cleanup
+        run: |
+          echo "🧹 Cleaning Kubernetes-managed AWS resources..."
+
+          # Check if EKS cluster exists and is accessible
+          if aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} >/dev/null 2>&1; then
+            echo "✅ EKS cluster found, attempting to clean Kubernetes resources..."
+            
+            # Install kubectl
+            echo "📦 Installing kubectl..."
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/
+            
+            # Update kubeconfig
+            echo "🔧 Configuring kubectl..."
+            aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+            
+            # Test cluster connectivity
+            if kubectl cluster-info >/dev/null 2>&1; then
+              echo "✅ Cluster connection successful"
+              
+              # 1. Delete LoadBalancer services (creates AWS LoadBalancers)
+              echo "🗑️ Deleting LoadBalancer services..."
+              LB_SERVICES=$(kubectl get services --all-namespaces --field-selector spec.type=LoadBalancer -o name 2>/dev/null || echo "")
+              if [ ! -z "$LB_SERVICES" ]; then
+                echo "   Found LoadBalancer services: $LB_SERVICES"
+                kubectl delete services --all-namespaces --field-selector spec.type=LoadBalancer --timeout=120s || true
+                echo "   ⏳ Waiting for LoadBalancers to be deleted..."
+                sleep 60
+              else
+                echo "   ℹ️ No LoadBalancer services found"
+              fi
+              
+              # 2. Delete Ingresses (may create AWS LoadBalancers/ALBs)
+              echo "🗑️ Deleting Ingresses..."
+              INGRESSES=$(kubectl get ingress --all-namespaces -o name 2>/dev/null || echo "")
+              if [ ! -z "$INGRESSES" ]; then
+                echo "   Found ingresses: $INGRESSES"
+                kubectl delete ingress --all-namespaces --timeout=120s || true
+                echo "   ⏳ Waiting for Ingress resources to be deleted..."
+                sleep 30
+              else
+                echo "   ℹ️ No Ingresses found"
+              fi
+              
+              # 3. Delete PersistentVolumes (creates AWS EBS volumes)
+              echo "🗑️ Deleting PersistentVolumeClaims..."
+              PVCS=$(kubectl get pvc --all-namespaces -o name 2>/dev/null || echo "")
+              if [ ! -z "$PVCS" ]; then
+                echo "   Found PVCs: $PVCS"
+                kubectl delete pvc --all-namespaces --timeout=120s || true
+                echo "   ⏳ Waiting for PVCs to be deleted..."
+                sleep 30
+              else
+                echo "   ℹ️ No PVCs found"
+              fi
+              
+              # 4. Delete any remaining resources in our application namespace
+              echo "🗑️ Cleaning application resources..."
+              kubectl delete deployment,service,configmap,secret,ingress -l app=vanillatstodo --timeout=60s || true
+              
+              echo "✅ Kubernetes resource cleanup completed"
+              echo "K8S_CLEANUP_STATUS=✅" >> $GITHUB_ENV
+              
+            else
+              echo "⚠️ Cannot connect to cluster, skipping Kubernetes cleanup"
+              echo "ℹ️ Resources may need manual cleanup in AWS Console"
+              echo "K8S_CLEANUP_STATUS=⚠️" >> $GITHUB_ENV
+            fi
+          else
+            echo "ℹ️ EKS cluster not found, skipping Kubernetes cleanup"
+            echo "K8S_CLEANUP_STATUS=✅" >> $GITHUB_ENV
+          fi
+
       - name: Manual EKS Cleanup (if needed)
         id: manual_eks_cleanup
         run: |
@@ -1144,6 +1220,7 @@ jobs:
           echo "| Resource | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "| -------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
           echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: 1.31 |" >> $GITHUB_STEP_SUMMARY
+          echo "| K8s Resources | ${K8S_CLEANUP_STATUS:-❌} | LoadBalancers, PVCs, Ingresses |" >> $GITHUB_STEP_SUMMARY
 
           # Monitoring status based on whether Terraform failed
           if [ "${MONITORING_TERRAFORM_FAILED:-false}" = "true" ]; then
