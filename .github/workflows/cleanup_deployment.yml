@@ -1,0 +1,219 @@
+name: "Cleanup AWS EKS Deployment"
+
+on:
+  workflow_dispatch:
+    inputs:
+      cleanup_type:
+        description: "Type of cleanup to perform"
+        required: true
+        default: "deployment"
+        type: choice
+        options:
+          - deployment # Just the app deployment
+          - all-k8s # All Kubernetes resources
+          - failed-pods # Only failed/stuck pods
+      environment:
+        description: "Environment to cleanup"
+        required: true
+        default: "experimental"
+        type: choice
+        options:
+          - staging
+          - production
+          - experimental
+      confirm:
+        description: "Type 'cleanup' to confirm"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: "vanillatstodo-cluster"
+  AWS_REGION: "us-east-2"
+  APP_NAME: "vanillatstodo"
+  ENVIRONMENT: ${{ github.event.inputs.environment }}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'cleanup'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Load Environment Variables
+        run: |
+          cat .github/variables/environment.env >> $GITHUB_ENV
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      - name: Verify EKS Cluster
+        run: |
+          echo "🔍 Verifying EKS cluster..."
+          if ! aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} >/dev/null 2>&1; then
+            echo "❌ EKS cluster not found!"
+            exit 1
+          fi
+          echo "✅ EKS cluster verified"
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Pre-Cleanup Status
+        run: |
+          echo "📊 Current Kubernetes Status:"
+          echo "================================"
+
+          echo "🔍 Deployments:"
+          kubectl get deployments -l app=${{ env.APP_NAME }} -o wide || echo "No deployments found"
+
+          echo ""
+          echo "🔍 Pods:"
+          kubectl get pods -l app=${{ env.APP_NAME }} -o wide || echo "No pods found"
+
+          echo ""
+          echo "🔍 Services:"
+          kubectl get services -l app=${{ env.APP_NAME }} -o wide || echo "No services found"
+
+          echo ""
+          echo "🔍 ReplicaSets:"
+          kubectl get replicasets -l app=${{ env.APP_NAME }} -o wide || echo "No replicasets found"
+
+      - name: Cleanup Deployment
+        if: github.event.inputs.cleanup_type == 'deployment' || github.event.inputs.cleanup_type == 'all-k8s'
+        run: |
+          echo "🗑️ Cleaning up deployment..."
+
+          # Delete deployment
+          if kubectl get deployment ${{ env.APP_NAME }} >/dev/null 2>&1; then
+            echo "✅ Found deployment ${{ env.APP_NAME }}, deleting..."
+            kubectl delete deployment ${{ env.APP_NAME }} --timeout=60s
+            echo "✅ Deployment deleted"
+          else
+            echo "ℹ️ No deployment found"
+          fi
+
+          # Wait for pods to terminate
+          echo "⏳ Waiting for pods to terminate..."
+          kubectl wait --for=delete pods -l app=${{ env.APP_NAME }} --timeout=120s || true
+
+      - name: Cleanup Failed Pods
+        if: github.event.inputs.cleanup_type == 'failed-pods' || github.event.inputs.cleanup_type == 'all-k8s'
+        run: |
+          echo "🗑️ Cleaning up failed/stuck pods..."
+
+          # Delete failed pods
+          FAILED_PODS=$(kubectl get pods -l app=${{ env.APP_NAME }} --field-selector=status.phase!=Running,status.phase!=Succeeded -o name 2>/dev/null || echo "")
+
+          if [ ! -z "$FAILED_PODS" ]; then
+            echo "✅ Found failed pods, deleting..."
+            echo "$FAILED_PODS"
+            kubectl delete $FAILED_PODS --force --grace-period=0 || true
+          else
+            echo "ℹ️ No failed pods found"
+          fi
+
+          # Delete pending pods
+          PENDING_PODS=$(kubectl get pods -l app=${{ env.APP_NAME }} --field-selector=status.phase=Pending -o name 2>/dev/null || echo "")
+
+          if [ ! -z "$PENDING_PODS" ]; then
+            echo "✅ Found pending pods, deleting..."
+            echo "$PENDING_PODS"
+            kubectl delete $PENDING_PODS --force --grace-period=0 || true
+          else
+            echo "ℹ️ No pending pods found"
+          fi
+
+      - name: Cleanup ReplicaSets
+        if: github.event.inputs.cleanup_type == 'all-k8s'
+        run: |
+          echo "🗑️ Cleaning up old ReplicaSets..."
+
+          # Delete replicasets
+          OLD_RS=$(kubectl get replicasets -l app=${{ env.APP_NAME }} -o name 2>/dev/null || echo "")
+
+          if [ ! -z "$OLD_RS" ]; then
+            echo "✅ Found old ReplicaSets, deleting..."
+            echo "$OLD_RS"
+            kubectl delete $OLD_RS || true
+          else
+            echo "ℹ️ No ReplicaSets found"
+          fi
+
+      - name: Cleanup Services (Optional)
+        if: github.event.inputs.cleanup_type == 'all-k8s'
+        run: |
+          echo "🗑️ Cleaning up services..."
+
+          # Note: Be careful with services as they might be shared
+          if kubectl get service ${{ env.APP_NAME }} >/dev/null 2>&1; then
+            echo "⚠️ Found service ${{ env.APP_NAME }}"
+            echo "ℹ️ Keeping service (delete manually if needed)"
+            # Uncomment below to also delete service:
+            # kubectl delete service ${{ env.APP_NAME }}
+          else
+            echo "ℹ️ No service found"
+          fi
+
+      - name: Force Cleanup Stuck Resources
+        if: github.event.inputs.cleanup_type == 'all-k8s'
+        run: |
+          echo "🔥 Force cleaning any stuck resources..."
+
+          # Force delete any remaining pods
+          kubectl delete pods -l app=${{ env.APP_NAME }} --force --grace-period=0 || true
+
+          # Remove any finalizers that might be blocking deletion
+          kubectl patch deployment ${{ env.APP_NAME }} -p '{"metadata":{"finalizers":[]}}' --type=merge || true
+
+      - name: Post-Cleanup Status
+        run: |
+          echo "📊 Post-Cleanup Kubernetes Status:"
+          echo "==================================="
+
+          echo "🔍 Deployments:"
+          kubectl get deployments -l app=${{ env.APP_NAME }} -o wide || echo "✅ No deployments found"
+
+          echo ""
+          echo "🔍 Pods:"
+          kubectl get pods -l app=${{ env.APP_NAME }} -o wide || echo "✅ No pods found"
+
+          echo ""
+          echo "🔍 Services:"
+          kubectl get services -l app=${{ env.APP_NAME }} -o wide || echo "✅ No services found"
+
+          echo ""
+          echo "🔍 ReplicaSets:"
+          kubectl get replicasets -l app=${{ env.APP_NAME }} -o wide || echo "✅ No replicasets found"
+
+      - name: Cleanup Summary
+        if: always()
+        run: |
+          echo "### Cleanup Summary 🧹" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Action | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| -------- | ------ | ------ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cleanup Type | ${{ github.event.inputs.cleanup_type }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ env.ENVIRONMENT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster | ${{ env.CLUSTER_NAME }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Region | ${{ env.AWS_REGION }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} | Job Status |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Cleanup completed!** You can now safely redeploy your application." >> $GITHUB_STEP_SUMMARY
