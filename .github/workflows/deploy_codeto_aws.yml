@@ -79,6 +79,19 @@ jobs:
             --name ${{ env.CLUSTER_NAME }} \
             --region ${{ env.AWS_REGION }}
 
+      - name: Verify Cluster Health
+        run: |
+          echo "🔍 Checking cluster health..."
+          echo "📊 Cluster Info:"
+          kubectl cluster-info
+          echo ""
+          echo "📊 Node Status:"
+          kubectl get nodes -o wide || echo "❌ No nodes found!"
+          echo ""
+          echo "📊 Node Groups (AWS):"
+          aws eks describe-nodegroup --cluster-name ${{ env.CLUSTER_NAME }} --nodegroup-name workers || echo "❌ No nodegroup found!"
+          echo ""
+
       - name: Save Current Deployment
         run: |
           if kubectl get deployment vanillatstodo &>/dev/null; then
