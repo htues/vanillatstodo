@@ -1,4 +1,4 @@
-name: Deploy to AWS EKS
+name: Deploy CodeBase to AWS
 
 on:
   # Remove automatic triggers - Manual only
@@ -79,6 +79,19 @@ jobs:
             --name ${{ env.CLUSTER_NAME }} \
             --region ${{ env.AWS_REGION }}
 
+      - name: Verify Cluster Health
+        run: |
+          echo "🔍 Checking cluster health..."
+          echo "📊 Cluster Info:"
+          kubectl cluster-info
+          echo ""
+          echo "📊 Node Status:"
+          kubectl get nodes -o wide || echo "❌ No nodes found!"
+          echo ""
+          echo "📊 Node Groups (AWS):"
+          aws eks describe-nodegroup --cluster-name ${{ env.CLUSTER_NAME }} --nodegroup-name workers || echo "❌ No nodegroup found!"
+          echo ""
+
       - name: Save Current Deployment
         run: |
           if kubectl get deployment vanillatstodo &>/dev/null; then
@@ -124,8 +137,24 @@ jobs:
           echo "⏳ Waiting for deployment rollout..."
           if ! kubectl rollout status deployment/vanillatstodo --timeout=10m; then
             echo "❌ Deployment failed!"
+            echo ""
+            echo "🔍 Deployment Details:"
             kubectl describe deployment/vanillatstodo
-            kubectl logs -l app=vanillatstodo --tail=100
+            echo ""
+            echo "🔍 Pod Status:"
+            kubectl get pods -l app=vanillatstodo -o wide
+            echo ""
+            echo "🔍 Pod Events:"
+            kubectl describe pods -l app=vanillatstodo
+            echo ""
+            echo "🔍 Container Logs:"
+            kubectl logs -l app=vanillatstodo --tail=100 --all-containers=true
+            echo ""
+            echo "🔍 Node Resources:"
+            kubectl top nodes || echo "Metrics not available"
+            echo ""
+            echo "🔍 Cluster Events:"
+            kubectl get events --sort-by=.metadata.creationTimestamp --tail=20
             exit 1
           fi
 

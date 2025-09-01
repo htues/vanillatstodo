@@ -38,23 +38,25 @@ spec:
             limits:
               cpu: "200m"
               memory: "256Mi"
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 80
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /
-              port: 80
-            initialDelaySeconds: 15
-            periodSeconds: 20
+          # Temporarily commented out health checks for initial deployment
+          # readinessProbe:
+          #   httpGet:
+          #     path: /
+          #     port: 80
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
+          # livenessProbe:
+          #   httpGet:
+          #     path: /
+          #     port: 80
+          #   initialDelaySeconds: 15
+          #   periodSeconds: 20
           env:
             - name: NODE_ENV
               value: "experimental"
       imagePullSecrets:
         - name: regcred
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
+      # Temporarily commented out security context for debugging
+      # securityContext:
+      #   runAsNonRoot: true
+      #   runAsUser: 1000

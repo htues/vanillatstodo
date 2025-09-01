@@ -1,4 +1,4 @@
-name: "Deploy IaC Resources"
+name: Deploy TFIaC on AWS
 
 "on":
   workflow_dispatch:
