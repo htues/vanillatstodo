@@ -1,4 +1,4 @@
-name: "Cleanup AWS EKS Deployment"
+name: Destroy CodeBase on AWS
 
 on:
   workflow_dispatch:
