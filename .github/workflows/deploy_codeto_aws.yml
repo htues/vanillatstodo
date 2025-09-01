@@ -1,4 +1,4 @@
-name: Deploy to AWS EKS
+name: Deploy CodeBase to AWS
 
 on:
   # Remove automatic triggers - Manual only
