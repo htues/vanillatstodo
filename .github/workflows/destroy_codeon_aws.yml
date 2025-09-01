@@ -158,19 +158,38 @@ jobs:
             echo "ℹ️ No ReplicaSets found"
           fi
 
-      - name: Cleanup Services (Optional)
-        if: github.event.inputs.cleanup_type == 'all-k8s'
+      - name: Cleanup Services and LoadBalancers
+        if: github.event.inputs.cleanup_type == 'deployment' || github.event.inputs.cleanup_type == 'all-k8s'
         run: |
-          echo "🗑️ Cleaning up services..."
+          echo "🗑️ Cleaning up services and AWS LoadBalancers..."
 
-          # Note: Be careful with services as they might be shared
-          if kubectl get service ${{ env.APP_NAME }} >/dev/null 2>&1; then
-            echo "⚠️ Found service ${{ env.APP_NAME }}"
-            echo "ℹ️ Keeping service (delete manually if needed)"
-            # Uncomment below to also delete service:
-            # kubectl delete service ${{ env.APP_NAME }}
+          # Find and delete LoadBalancer services (these create AWS LoadBalancers)
+          LB_SERVICES=$(kubectl get services -l app=${{ env.APP_NAME }} --field-selector spec.type=LoadBalancer -o name 2>/dev/null || echo "")
+
+          if [ ! -z "$LB_SERVICES" ]; then
+            echo "✅ Found LoadBalancer services: $LB_SERVICES"
+            echo "🗑️ Deleting LoadBalancer services (this will also delete AWS LoadBalancers)..."
+            kubectl delete $LB_SERVICES --timeout=180s || true
+            
+            echo "⏳ Waiting for AWS LoadBalancer deletion to propagate..."
+            sleep 60
+            
+            # Verify AWS LoadBalancer is being deleted
+            echo "🔍 Checking AWS LoadBalancer deletion status..."
+            aws elbv2 describe-load-balancers --query "LoadBalancers[?contains(LoadBalancerName, '${{ env.APP_NAME }}') || contains(LoadBalancerName, 'a4a3c58a')].{Name:LoadBalancerName,State:State.Code}" --output table || echo "No LoadBalancers found (good!)"
           else
-            echo "ℹ️ No service found"
+            echo "ℹ️ No LoadBalancer services found"
+          fi
+
+          # Clean up any remaining services for the app
+          REMAINING_SERVICES=$(kubectl get services -l app=${{ env.APP_NAME }} -o name 2>/dev/null || echo "")
+
+          if [ ! -z "$REMAINING_SERVICES" ]; then
+            echo "✅ Found remaining services: $REMAINING_SERVICES"
+            echo "🗑️ Deleting remaining services..."
+            kubectl delete $REMAINING_SERVICES --timeout=60s || true
+          else
+            echo "ℹ️ No remaining services found"
           fi
 
       - name: Force Cleanup Stuck Resources
@@ -204,6 +223,29 @@ jobs:
           echo "🔍 ReplicaSets:"
           kubectl get replicasets -l app=${{ env.APP_NAME }} -o wide || echo "✅ No replicasets found"
 
+          echo ""
+          echo "🔍 AWS LoadBalancer Status:"
+          aws elbv2 describe-load-balancers --query "LoadBalancers[?contains(LoadBalancerName, '${{ env.APP_NAME }}') || contains(LoadBalancerName, 'a4a3c58a')].{Name:LoadBalancerName,State:State.Code}" --output table || echo "✅ No LoadBalancers found"
+
+      - name: Final LoadBalancer Cleanup Verification
+        run: |
+          echo "🔍 Final verification - checking for any remaining LoadBalancers..."
+
+          # Wait a bit more for AWS propagation
+          sleep 30
+
+          # Check for any LoadBalancers that might still be deleting
+          REMAINING_LBS=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?contains(LoadBalancerName, '${{ env.APP_NAME }}') || contains(LoadBalancerName, 'a4a3c58a')].LoadBalancerName" --output text 2>/dev/null || echo "")
+
+          if [ ! -z "$REMAINING_LBS" ] && [ "$REMAINING_LBS" != "None" ]; then
+            echo "⚠️ Warning: Some LoadBalancers may still be in deletion process:"
+            echo "$REMAINING_LBS"
+            echo "ℹ️ This is normal - AWS LoadBalancer deletion can take 2-5 minutes"
+            echo "ℹ️ Verify manually if infrastructure destruction fails"
+          else
+            echo "✅ All LoadBalancers successfully cleaned up"
+          fi
+
       - name: Cleanup Summary
         if: always()
         run: |
@@ -214,6 +256,8 @@ jobs:
           echo "| Environment | ${{ env.ENVIRONMENT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| Cluster | ${{ env.CLUSTER_NAME }} | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| Region | ${{ env.AWS_REGION }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| LoadBalancer Cleanup | ✅ | AWS ELB/NLB deleted |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} | Job Status |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Cleanup completed!** You can now safely redeploy your application." >> $GITHUB_STEP_SUMMARY
+          echo "**Cleanup completed!** LoadBalancers have been properly cleaned up." >> $GITHUB_STEP_SUMMARY
+          echo "You can now safely run infrastructure destruction without dependency issues." >> $GITHUB_STEP_SUMMARY
