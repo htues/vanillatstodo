@@ -1,6 +1,6 @@
 # Use data source to reference existing role
 data "aws_iam_role" "eks_cluster" {
-  name = local.computed_cluster_role_name
+  name = "eks_cluster_role"
 }
 
 # Local variables
@@ -59,7 +59,7 @@ resource "aws_eks_cluster" "main" {
 
 # IAM role for EKS Node Group
 data "aws_iam_role" "eks_nodegroup" {
-  name = "${var.environment}-eks-nodegroup-role"
+  name = "eks_node_role"
 }
 
 # EKS Node Group
