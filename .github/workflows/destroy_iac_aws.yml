@@ -1,4 +1,4 @@
-name: "Destroy IaC Resources"
+name: Destroy TFIaC on AWS
 
 "on":
   workflow_dispatch:
