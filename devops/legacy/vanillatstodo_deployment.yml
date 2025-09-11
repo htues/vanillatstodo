@@ -6,6 +6,7 @@ metadata:
     app: vanillatstodo
     environment: experimental
     version: "0.0.1"
+    managed-by: kubectl
 spec:
   replicas: 2
   strategy:
@@ -28,6 +29,7 @@ spec:
       containers:
         - name: vanillatstodo
           image: hftamayo/vanillatstodo:0.0.1
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
               name: http
@@ -38,7 +40,7 @@ spec:
             limits:
               cpu: "200m"
               memory: "256Mi"
-          # Temporarily commented out health checks for initial deployment
+          # Health checks disabled for static React app
           # readinessProbe:
           #   httpGet:
           #     path: /
@@ -56,7 +58,7 @@ spec:
               value: "experimental"
       imagePullSecrets:
         - name: regcred
-      # Temporarily commented out security context for debugging
+      # Security context disabled for debugging
       # securityContext:
       #   runAsNonRoot: true
       #   runAsUser: 1000

@@ -4,7 +4,8 @@ metadata:
   name: vanillatstodo
   labels:
     app: vanillatstodo
-    environment: staging
+    environment: experimental
+    managed-by: kubectl
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
     service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
@@ -17,6 +18,6 @@ spec:
     - protocol: TCP
       port: 80
       targetPort: 80
-  type: LoadBalancer #if I won't use Ingress API: LoadBalancer
+  type: LoadBalancer
   sessionAffinity: None
   externalTrafficPolicy: Local
