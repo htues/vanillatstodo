@@ -1,0 +1,51 @@
+# Staging Environment Configuration
+app:
+  name: vanillatstodo
+  version: "0.0.1"
+  environment: staging
+
+image:
+  repository: hftamayo/vanillatstodo
+  tag: "0.0.1"
+  pullPolicy: Always
+
+deployment:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+resources:
+  requests:
+    cpu: "150m"
+    memory: "192Mi"
+  limits:
+    cpu: "300m"
+    memory: "384Mi"
+
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 80
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-timeout: "60"
+  externalTrafficPolicy: Local
+
+healthChecks:
+  enabled: false # Still disabled for static React app
+
+security:
+  enabled: false # Still disabled for debugging
+
+imagePullSecrets:
+  - name: regcred
+
+monitoring:
+  prometheus:
+    scrape: true
+    port: "80"
