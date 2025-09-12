@@ -84,7 +84,8 @@ jobs:
           echo "================================"
 
           echo "🔍 Helm Releases:"
-          helm list -A | grep vanillatstodo || echo "No Helm releases found"
+          echo "🔍 Checking Helm releases..."
+          helm list -A | grep ${{ env.APP_NAME }} || echo "No Helm releases found"
 
           echo ""
           echo "🔍 Deployments:"
@@ -103,8 +104,11 @@ jobs:
         run: |
           echo "🗑️ Cleaning up Helm release..."
 
-          # List all vanillatstodo releases
-          RELEASES=$(helm list -A -o json | jq -r '.[] | select(.name | contains("vanillatstodo")) | .name' 2>/dev/null || echo "")
+          run: |
+          echo "🗑️ Uninstalling Helm releases..."
+
+          # List all app releases
+          RELEASES=$(helm list -A -o json | jq -r '.[] | select(.name | contains("${{ env.APP_NAME }}")) | .name' 2>/dev/null || echo "")
 
           if [ ! -z "$RELEASES" ]; then
             echo "✅ Found Helm releases:"
@@ -222,7 +226,7 @@ jobs:
           echo "==================================="
 
           echo "🔍 Helm Releases:"
-          helm list -A | grep vanillatstodo || echo "✅ No Helm releases found"
+          helm list -A | grep ${{ env.APP_NAME }} || echo "✅ No Helm releases found"
 
           echo ""
           echo "🔍 Deployments:"
@@ -270,7 +274,7 @@ jobs:
           echo "| Deployment Method | Helm | Security Enhanced |" >> $GITHUB_STEP_SUMMARY
           echo "| Cluster | ${{ env.CLUSTER_NAME }} | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| Region | ${{ env.AWS_REGION }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Helm Releases | Uninstalled | All vanillatstodo releases |" >> $GITHUB_STEP_SUMMARY
+          echo "| Helm Releases | Uninstalled | All ${{ env.APP_NAME }} releases |" >> $GITHUB_STEP_SUMMARY
           echo "| LoadBalancer Cleanup | ✅ | AWS ELB/NLB deleted |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} | Job Status |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

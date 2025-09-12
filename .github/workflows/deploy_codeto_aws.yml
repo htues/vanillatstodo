@@ -23,6 +23,7 @@ permissions:
 env:
   CLUSTER_NAME: ${{ vars.CLUSTER_NAME || 'vanillatstodo-cluster' }}
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+  APP_NAME: ${{ vars.APP_NAME || 'vanillatstodo' }}
   ENVIRONMENT: ${{ github.event.client_payload.environment || github.event.inputs.environment || 'experimental' }}
 
 jobs:
@@ -100,14 +101,20 @@ jobs:
           kubectl get nodes -o wide || echo "❌ No nodes found!"
           echo ""
           echo "📊 Node Groups (AWS):"
-          aws eks describe-nodegroup --cluster-name ${{ env.CLUSTER_NAME }} --nodegroup-name workers || echo "❌ No nodegroup found!"
+          # List all nodegroups instead of hardcoding 'workers'
+          NODEGROUPS=$(aws eks list-nodegroups --cluster-name ${{ env.CLUSTER_NAME }} --query "nodegroups[0]" --output text 2>/dev/null || echo "")
+          if [ -n "$NODEGROUPS" ] && [ "$NODEGROUPS" != "None" ]; then
+            aws eks describe-nodegroup --cluster-name ${{ env.CLUSTER_NAME }} --nodegroup-name $NODEGROUPS || echo "❌ Nodegroup details unavailable!"
+          else
+            echo "❌ No nodegroups found!"
+          fi
           echo ""
 
       - name: Save Current Deployment
         run: |
-          if helm status vanillatstodo-${{ env.ENVIRONMENT }} &>/dev/null; then
+          if helm status ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} &>/dev/null; then
             echo "📦 Saving current Helm release state..."
-            helm get values vanillatstodo-${{ env.ENVIRONMENT }} > previous_values.yaml
+            helm get values ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} > previous_values.yaml
             echo "PREVIOUS_RELEASE_EXISTS=true" >> $GITHUB_ENV
           else
             echo "ℹ️ No existing Helm release found"
@@ -150,13 +157,14 @@ jobs:
         run: |
           echo "🚀 Deploying application with Helm..."
           echo "Environment: ${{ env.ENVIRONMENT }}"
-          echo "Release name: vanillatstodo-${{ env.ENVIRONMENT }}"
+          echo "Release name: ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
           echo "Values file: ./devops/helm-chart/values-${{ env.ENVIRONMENT }}.yaml"
           echo "Docker image: ${{ env.FULL_DOCKER_IMAGE }}"
 
-          helm upgrade --install vanillatstodo-${{ env.ENVIRONMENT }} ./devops/helm-chart \
+          helm upgrade --install ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} ./devops/helm-chart \
             -f ./devops/helm-chart/values-${{ env.ENVIRONMENT }}.yaml \
             --wait --timeout=600s \
+            --set app.name=${{ env.APP_NAME }} \
             --set image.repository=${{ vars.DOCKER_REPOSITORY || 'hftamayo/vanillatstodo' }} \
             --set image.tag=${{ env.DOCKER_TAG }} \
             --set app.environment=${{ env.ENVIRONMENT }}
@@ -166,26 +174,26 @@ jobs:
           echo "⏳ Waiting for Helm deployment to be ready..."
 
           # Check deployment status
-          if ! kubectl rollout status deployment/vanillatstodo --timeout=10m; then
+          if ! kubectl rollout status deployment/${{ env.APP_NAME }} --timeout=10m; then
             echo "❌ Deployment failed!"
             echo ""
             echo "🔍 Helm Release Status:"
-            helm status vanillatstodo-${{ env.ENVIRONMENT }}
+            helm status ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}
             echo ""
             echo "🔍 Deployment Details:"
-            kubectl describe deployment/vanillatstodo
+            kubectl describe deployment/${{ env.APP_NAME }}
             echo ""
             echo "🔍 Pod Status:"
-            kubectl get pods -l app=vanillatstodo -o wide
+            kubectl get pods -l app=${{ env.APP_NAME }} -o wide
             echo ""
             echo "🔍 Pod Events:"
-            kubectl describe pods -l app=vanillatstodo
+            kubectl describe pods -l app=${{ env.APP_NAME }}
             echo ""
             echo "🔍 Container Logs:"
-            kubectl logs -l app=vanillatstodo --tail=100 --all-containers=true
+            kubectl logs -l app=${{ env.APP_NAME }} --tail=100 --all-containers=true
             echo ""
             echo "🔍 Helm Release History:"
-            helm history vanillatstodo-${{ env.ENVIRONMENT }}
+            helm history ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}
             exit 1
           fi
 
@@ -194,7 +202,7 @@ jobs:
         run: |
           echo "⏳ Waiting for LoadBalancer..."
           for i in {1..20}; do
-            EXTERNAL_IP=$(kubectl get svc vanillatstodo -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            EXTERNAL_IP=$(kubectl get svc ${{ env.APP_NAME }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
             if [ -n "$EXTERNAL_IP" ]; then
               echo "SERVICE_URL=${EXTERNAL_IP}" >> $GITHUB_ENV
               echo "✅ Service URL: ${EXTERNAL_IP}"
@@ -222,8 +230,8 @@ jobs:
         if: failure() && env.PREVIOUS_RELEASE_EXISTS == 'true'
         run: |
           echo "🔄 Rolling back Helm release..."
-          helm rollback vanillatstodo-${{ env.ENVIRONMENT }} 0
-          kubectl rollout status deployment/vanillatstodo --timeout=5m
+          helm rollback ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} 0
+          kubectl rollout status deployment/${{ env.APP_NAME }} --timeout=5m
 
       - name: Deployment Summary
         if: always()
@@ -233,7 +241,7 @@ jobs:
           echo "| --------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
           echo "| Cluster | ${{ job.status }} | ${{ env.CLUSTER_NAME }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | ${{ env.ENVIRONMENT }} | ${{ env.AWS_REGION }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Release Name | vanillatstodo-${{ env.ENVIRONMENT }} | Helm Release |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release Name | ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} | Helm Release |" >> $GITHUB_STEP_SUMMARY
           echo "| Values File | values-${{ env.ENVIRONMENT }}.yaml | Configuration |" >> $GITHUB_STEP_SUMMARY
           echo "| Service URL | ${{ env.SERVICE_URL || 'N/A' }} | LoadBalancer |" >> $GITHUB_STEP_SUMMARY
           echo "| Image | ✅ | ${{ env.FULL_DOCKER_IMAGE }} |" >> $GITHUB_STEP_SUMMARY
