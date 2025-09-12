@@ -21,9 +21,8 @@ permissions:
   packages: read
 
 env:
-  CLUSTER_NAME: ${{ github.event.client_payload.cluster_name || 'vanillatstodo-cluster' }}
-  AWS_REGION: "us-east-2"
-  DOCKER_IMAGE: "hftamayo/vanillatstodo:0.0.1"
+  CLUSTER_NAME: ${{ vars.CLUSTER_NAME || 'vanillatstodo-cluster' }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
   ENVIRONMENT: ${{ github.event.client_payload.environment || github.event.inputs.environment || 'experimental' }}
 
 jobs:
@@ -39,9 +38,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Load Environment Variables
+      - name: Set Dynamic Variables
         run: |
-          cat .github/variables/environment.env >> $GITHUB_ENV
+          # Generate dynamic Docker tag based on Git info
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            DOCKER_TAG="${{ vars.DOCKER_TAG || '0.0.1' }}"
+          else
+            DOCKER_TAG="${{ github.ref_name }}-${{ github.sha }}"
+          fi
+          echo "DOCKER_TAG=${DOCKER_TAG}" >> $GITHUB_ENV
+          echo "FULL_DOCKER_IMAGE=${{ vars.DOCKER_REPOSITORY || 'hftamayo/vanillatstodo' }}:${DOCKER_TAG}" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -127,7 +133,8 @@ jobs:
       - name: Verify Docker Image
         run: |
           echo "🔍 Verifying Docker image..."
-          if ! docker pull ${{ env.DOCKER_IMAGE }}; then
+          echo "Docker image: ${{ env.FULL_DOCKER_IMAGE }}"
+          if ! docker pull ${{ env.FULL_DOCKER_IMAGE }}; then
             echo "❌ Docker image not found!"
             exit 1
           fi
@@ -145,11 +152,13 @@ jobs:
           echo "Environment: ${{ env.ENVIRONMENT }}"
           echo "Release name: vanillatstodo-${{ env.ENVIRONMENT }}"
           echo "Values file: ./devops/helm-chart/values-${{ env.ENVIRONMENT }}.yaml"
+          echo "Docker image: ${{ env.FULL_DOCKER_IMAGE }}"
 
           helm upgrade --install vanillatstodo-${{ env.ENVIRONMENT }} ./devops/helm-chart \
             -f ./devops/helm-chart/values-${{ env.ENVIRONMENT }}.yaml \
             --wait --timeout=600s \
-            --set image.tag=0.0.1 \
+            --set image.repository=${{ vars.DOCKER_REPOSITORY || 'hftamayo/vanillatstodo' }} \
+            --set image.tag=${{ env.DOCKER_TAG }} \
             --set app.environment=${{ env.ENVIRONMENT }}
 
       - name: Wait for Deployment
@@ -227,7 +236,7 @@ jobs:
           echo "| Release Name | vanillatstodo-${{ env.ENVIRONMENT }} | Helm Release |" >> $GITHUB_STEP_SUMMARY
           echo "| Values File | values-${{ env.ENVIRONMENT }}.yaml | Configuration |" >> $GITHUB_STEP_SUMMARY
           echo "| Service URL | ${{ env.SERVICE_URL || 'N/A' }} | LoadBalancer |" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | ✅ | ${{ env.DOCKER_IMAGE }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | ✅ | ${{ env.FULL_DOCKER_IMAGE }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Deployment Method | Helm | Security Enhanced |" >> $GITHUB_STEP_SUMMARY
           echo "| Health Check | ${{ steps.health_check.outputs.health_status || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Rollback Status | ${{ job.status == 'failure' && env.PREVIOUS_RELEASE_EXISTS == 'true' && 'Applied' || 'Not Required' }} |" >> $GITHUB_STEP_SUMMARY
