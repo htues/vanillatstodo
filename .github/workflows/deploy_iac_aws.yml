@@ -22,11 +22,11 @@ permissions:
   id-token: write
 
 env:
-  CLUSTER_NAME: "vanillatstodo-cluster"
-  BUCKET_NAME: "vanillatstodo-terraform-state"
-  AWS_REGION: "us-east-2"
+  CLUSTER_NAME: ${{ vars.CLUSTER_NAME || 'vanillatstodo-cluster' }}
+  BUCKET_NAME: ${{ vars.APP_NAME || 'vanillatstodo' }}-terraform-state
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
   TF_VERSION: "1.10.0"
-  PROJECT_NAME: "vanillatstodo"
+  PROJECT_NAME: ${{ vars.APP_NAME || 'vanillatstodo' }}
   ENVIRONMENT: ${{ github.event.inputs.environment }}
 
 concurrency:
@@ -59,9 +59,13 @@ jobs:
           chmod +x devops/scripts/infra-manager.sh
           devops/scripts/infra-manager.sh verify
 
-      - name: Load Environment Variables
+      - name: Set Dynamic Variables
         run: |
-          cat .github/variables/environment.env >> $GITHUB_ENV
+          echo "Using GitHub repository variables:"
+          echo "CLUSTER_NAME=${{ env.CLUSTER_NAME }}"
+          echo "AWS_REGION=${{ env.AWS_REGION }}"
+          echo "PROJECT_NAME=${{ env.PROJECT_NAME }}"
+          echo "BUCKET_NAME=${{ env.BUCKET_NAME }}"
 
       - name: Validate Region
         run: |
@@ -120,9 +124,9 @@ jobs:
       - name: Set Environment-Specific Role Name
         run: |
           if [[ "${{ env.ENVIRONMENT }}" == "production" ]]; then
-            echo "EKS_CLUSTER_ROLE=production-vanillatstodo-cluster-role" >> $GITHUB_ENV
+            echo "EKS_CLUSTER_ROLE=production-${{ env.PROJECT_NAME }}-cluster-role" >> $GITHUB_ENV
           else
-            echo "EKS_CLUSTER_ROLE=staging-vanillatstodo-cluster-role" >> $GITHUB_ENV
+            echo "EKS_CLUSTER_ROLE=staging-${{ env.PROJECT_NAME }}-cluster-role" >> $GITHUB_ENV
           fi
 
       - name: Deploy EKS Resources
