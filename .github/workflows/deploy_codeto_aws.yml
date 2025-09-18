@@ -41,12 +41,8 @@ jobs:
 
       - name: Set Dynamic Variables
         run: |
-          # Generate dynamic Docker tag based on Git info
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            DOCKER_TAG="${{ vars.DOCKER_TAG || '0.0.1' }}"
-          else
-            DOCKER_TAG="${{ github.ref_name }}-${{ github.sha }}"
-          fi
+          # Use stable tag for testing (change this for production)
+          DOCKER_TAG="${{ vars.DOCKER_TAG || '0.0.1' }}"
           echo "DOCKER_TAG=${DOCKER_TAG}" >> $GITHUB_ENV
           echo "FULL_DOCKER_IMAGE=${{ vars.DOCKER_REPOSITORY || 'hftamayo/vanillatstodo' }}:${DOCKER_TAG}" >> $GITHUB_ENV
 
