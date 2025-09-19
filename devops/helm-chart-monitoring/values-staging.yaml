@@ -1,0 +1,55 @@
+# Environment-specific values for staging
+# Inherits from values.yaml and overrides specific settings
+
+global:
+  environment: staging
+
+prometheus-stack:
+  # Grafana configuration for staging
+  grafana:
+    adminPassword: "staging-admin-pass"
+
+    # Use ClusterIP in staging (access via kubectl port-forward)
+    service:
+      type: ClusterIP
+      port: 80
+
+    # Smaller resources for staging
+    resources:
+      limits:
+        cpu: 300m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+  # Prometheus configuration for staging
+  prometheus:
+    prometheusSpec:
+      # Smaller retention for staging
+      retention: 7d
+      retentionSize: 5GB
+
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: 10Gi
+
+      # Smaller resources for staging
+      resources:
+        limits:
+          cpu: 500m
+          memory: 1Gi
+        requests:
+          cpu: 200m
+          memory: 512Mi
+
+  # AlertManager - simplified for staging
+  alertmanager:
+    config:
+      route:
+        receiver: "null"
+      receivers:
+        - name: "null"

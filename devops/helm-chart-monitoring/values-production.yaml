@@ -1,0 +1,95 @@
+# Environment-specific values for production
+# Enhanced security and performance settings
+
+global:
+  environment: production
+
+prometheus-stack:
+  # Grafana configuration for production
+  grafana:
+    # Use secure password from environment variable
+    adminPassword: "CHANGE_IN_PRODUCTION"
+
+    # LoadBalancer for production access
+    service:
+      type: LoadBalancer
+      port: 443 # HTTPS in production
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "arn:aws:acm:region:account:certificate/cert-id"
+        service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
+
+    # Production resources
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+    # Enhanced persistence
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClassName: gp3
+
+  # Prometheus configuration for production
+  prometheus:
+    prometheusSpec:
+      # Longer retention for production
+      retention: 90d
+      retentionSize: 50GB
+
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: gp3
+            resources:
+              requests:
+                storage: 100Gi
+
+      # Production resources
+      resources:
+        limits:
+          cpu: 2000m
+          memory: 4Gi
+        requests:
+          cpu: 1000m
+          memory: 2Gi
+
+  # AlertManager - full configuration for production
+  alertmanager:
+    enabled: true
+    config:
+      global:
+        smtp_smarthost: "smtp.company.com:587"
+        smtp_from: "alerts@vanillatstodo.com"
+        smtp_auth_username: "alerts@vanillatstodo.com"
+        smtp_auth_password: "smtp-password"
+
+      route:
+        group_by: ["alertname", "cluster", "service"]
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 12h
+        receiver: "default"
+        routes:
+          - match:
+              severity: critical
+            receiver: "critical-alerts"
+
+      receivers:
+        - name: "default"
+          email_configs:
+            - to: "devops@vanillatstodo.com"
+              subject: "[ALERT] {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}"
+              body: |
+                {{ range .Alerts }}
+                Alert: {{ .Annotations.summary }}
+                Description: {{ .Annotations.description }}
+                {{ end }}
+
+        - name: "critical-alerts"
+          email_configs:
+            - to: "critical@vanillatstodo.com"
+              subject: "[CRITICAL] {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}"

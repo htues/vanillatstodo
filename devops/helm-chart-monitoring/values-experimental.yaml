@@ -1,0 +1,61 @@
+# Environment-specific values for experimental/development
+# Optimized for quick iteration and testing
+
+global:
+  environment: experimental
+
+prometheus-stack:
+  # Grafana configuration for experimental
+  grafana:
+    adminPassword: "admin123" # Simple password for development
+
+    # LoadBalancer for easy access during development
+    service:
+      type: LoadBalancer
+      port: 80
+
+    # Minimal resources for experimental
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+    # Smaller persistence for experimental
+    persistence:
+      enabled: true
+      size: 5Gi
+
+  # Prometheus configuration for experimental
+  prometheus:
+    prometheusSpec:
+      # Short retention for experimental
+      retention: 3d
+      retentionSize: 2GB
+
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: 5Gi
+
+      # Minimal resources for experimental
+      resources:
+        limits:
+          cpu: 300m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 256Mi
+
+  # AlertManager - disabled for experimental
+  alertmanager:
+    enabled: false
+
+# Enable application monitoring for testing
+application:
+  monitoring:
+    enabled: true
