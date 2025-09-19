@@ -1,0 +1,169 @@
+# Default values for monitoring-stack
+# This file contains the default configuration for the monitoring stack
+
+# Global configuration
+global:
+  environment: experimental
+  project: vanillatstodo
+  cluster_name: vanillatstodo-cluster
+
+# Prometheus Stack Configuration (includes Prometheus + Grafana + AlertManager)
+prometheus:
+  enabled: true
+
+prometheus-stack:
+  # Prometheus configuration
+  prometheus:
+    prometheusSpec:
+      # Storage configuration
+      retention: 30d
+      retentionSize: 10GB
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: gp2
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 20Gi
+
+      # Resource limits
+      resources:
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+        requests:
+          cpu: 500m
+          memory: 1Gi
+
+      # Service Monitor configuration
+      serviceMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelectorNilUsesHelmValues: false
+      ruleSelectorNilUsesHelmValues: false
+
+  # Grafana configuration
+  grafana:
+    enabled: true
+    adminPassword: "admin123" # Change this in production!
+
+    # Persistence
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClassName: gp2
+
+    # Service configuration for LoadBalancer access
+    service:
+      type: LoadBalancer
+      port: 80
+
+    # Resource limits
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+    # Default dashboards
+    defaultDashboardsEnabled: true
+
+    # Additional dashboards
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: "default"
+            orgId: 1
+            folder: ""
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/default
+
+    dashboards:
+      default:
+        # Kubernetes cluster overview
+        kubernetes-cluster:
+          gnetId: 7249
+          revision: 1
+          datasource: Prometheus
+
+        # Node exporter dashboard
+        node-exporter:
+          gnetId: 1860
+          revision: 31
+          datasource: Prometheus
+
+        # Pod monitoring
+        kubernetes-pods:
+          gnetId: 6417
+          revision: 1
+          datasource: Prometheus
+
+  # AlertManager configuration
+  alertmanager:
+    enabled: true
+    config:
+      global:
+        smtp_smarthost: "localhost:587"
+        smtp_from: "alertmanager@vanillatstodo.com"
+
+      route:
+        group_by: ["alertname"]
+        group_wait: 10s
+        group_interval: 10s
+        repeat_interval: 1h
+        receiver: "web.hook"
+
+      receivers:
+        - name: "web.hook"
+          webhook_configs:
+            - url: "http://127.0.0.1:5001/"
+
+  # Node Exporter (for system metrics)
+  nodeExporter:
+    enabled: true
+
+  # kube-state-metrics (for Kubernetes object metrics)
+  kubeStateMetrics:
+    enabled: true
+
+  # Service monitors for automatic discovery
+  kubeApiServer:
+    enabled: true
+
+  kubelet:
+    enabled: true
+
+  kubeControllerManager:
+    enabled: true
+
+  coreDns:
+    enabled: true
+
+  kubeEtcd:
+    enabled: true
+
+  kubeScheduler:
+    enabled: true
+
+# Standalone Grafana (alternative to the one in prometheus-stack)
+grafana:
+  standalone:
+    enabled: false # Use the one from prometheus-stack instead
+
+# Custom application monitoring
+application:
+  monitoring:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      labels:
+        app: vanillatstodo
+      endpoints:
+        - port: http
+          path: /metrics
+          interval: 30s
