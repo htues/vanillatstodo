@@ -9,10 +9,10 @@ metadata:
     app.kubernetes.io/version: "{{ .Values.app.version }}"
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     environment: {{ .Values.app.environment }}
-{{- if .Values.service.annotations }}
+  {{- if .Values.service.annotations }}
   annotations:
     {{- toYaml .Values.service.annotations | nindent 4 }}
-{{- end }}
+  {{- end }}
 spec:
   selector:
     app: {{ .Values.app.name }}
@@ -22,6 +22,6 @@ spec:
       targetPort: {{ .Values.service.targetPort }}
   type: {{ .Values.service.type }}
   sessionAffinity: None
-{{- if .Values.service.externalTrafficPolicy }}
+  {{- if .Values.service.externalTrafficPolicy }}
   externalTrafficPolicy: {{ .Values.service.externalTrafficPolicy }}
-{{- end }}
+  {{- end }}

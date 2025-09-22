@@ -43,7 +43,7 @@ spec:
             limits:
               cpu: "{{ .Values.resources.limits.cpu }}"
               memory: "{{ .Values.resources.limits.memory }}"
-{{- if .Values.healthChecks.enabled }}
+          {{- if .Values.healthChecks.enabled }}
           readinessProbe:
             httpGet:
               path: {{ .Values.healthChecks.readinessProbe.httpGet.path }}
@@ -56,16 +56,16 @@ spec:
               port: {{ .Values.healthChecks.livenessProbe.httpGet.port }}
             initialDelaySeconds: {{ .Values.healthChecks.livenessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.healthChecks.livenessProbe.periodSeconds }}
-{{- end }}
+          {{- end }}
           env:
             - name: NODE_ENV
               value: "{{ .Values.app.environment }}"
-{{- if .Values.imagePullSecrets }}
+      {{- if .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml .Values.imagePullSecrets | nindent 8 }}
-{{- end }}
-{{- if .Values.security.enabled }}
+      {{- end }}
+      {{- if .Values.security.enabled }}
       securityContext:
         runAsNonRoot: {{ .Values.security.runAsNonRoot }}
         runAsUser: {{ .Values.security.runAsUser }}
-{{- end }}
+      {{- end }}
