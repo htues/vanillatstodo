@@ -23,7 +23,7 @@ kubectl apply -f devops/k8s/
 
 ```bash
 # For development/testing purposes only
-helm upgrade --install vanillatstodo-exp ./devops/helm-chart -f ./devops/helm-chart/values-experimental.yaml
+helm upgrade --install vanillatstodo-exp ./devops/helm-chart-app -f ./devops/helm-chart-app/values-experimental.yaml
 ```
 
 **Alternative for team development:**
@@ -38,7 +38,7 @@ make deploy-production
 ## Chart Structure
 
 ```
-devops/helm-chart/
+devops/helm-chart-app/
 ├── Chart.yaml                    # Chart metadata
 ├── values.yaml                   # Default values (production baseline)
 ├── values-experimental.yaml      # Development/experimental environment
@@ -61,10 +61,10 @@ Each environment has its own values file with appropriate resource allocations:
 
 ```bash
 # Dry run to see what would be deployed
-helm template vanillatstodo ./devops/helm-chart -f ./devops/helm-chart/values-experimental.yaml
+helm template vanillatstodo ./devops/helm-chart-app -f ./devops/helm-chart-app/values-experimental.yaml
 
 # Validate chart
-helm lint ./devops/helm-chart
+helm lint ./devops/helm-chart-app
 
 # Check deployment status
 helm status vanillatstodo-exp
@@ -86,7 +86,7 @@ cp values-production.yaml values-client1.yaml
 
 # Deploy for specific client (via GitHub Actions only)
 # Manual deployment for development only:
-helm upgrade --install client1-todo ./devops/helm-chart -f ./devops/helm-chart/values-client1.yaml
+helm upgrade --install client1-todo ./devops/helm-chart-app -f ./devops/helm-chart-app/values-client1.yaml
 ```
 
 ## 🔒 Security Best Practices

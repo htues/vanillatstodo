@@ -1,6 +1,6 @@
 # ⚠️ DEPRECATED: This directory is deprecated
 
-**This directory has been replaced by the Helm chart at `../helm-chart/`**
+**This directory has been replaced by the Helm chart at `../helm-chart-app/`**
 
 ## Migration Guide
 
@@ -14,13 +14,13 @@ kubectl apply -f devops/k8s/
 
 ```bash
 # Experimental environment
-helm upgrade --install vanillatstodo-exp ./devops/helm-chart -f ./devops/helm-chart/values-experimental.yaml
+helm upgrade --install vanillatstodo-exp ./devops/helm-chart-app -f ./devops/helm-chart-app/values-experimental.yaml
 
 # Staging environment
-helm upgrade --install vanillatstodo-staging ./devops/helm-chart -f ./devops/helm-chart/values-staging.yaml
+helm upgrade --install vanillatstodo-staging ./devops/helm-chart-app -f ./devops/helm-chart-app/values-staging.yaml
 
 # Production environment
-helm upgrade --install vanillatstodo-prod ./devops/helm-chart -f ./devops/helm-chart/values-production.yaml
+helm upgrade --install vanillatstodo-prod ./devops/helm-chart-app -f ./devops/helm-chart-app/values-production.yaml
 ```
 
 ## Why Helm?
@@ -37,4 +37,4 @@ helm upgrade --install vanillatstodo-prod ./devops/helm-chart -f ./devops/helm-c
 
 These files are kept for reference but should not be used for new deployments.
 
-**Please use the Helm chart at `../helm-chart/` for all new deployments.**
+**Please use the Helm chart at `../helm-chart-app/` for all new deployments.**
