@@ -1,0 +1,57 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: vanillatstodo-monitoring-experimental
+
+# Reference the base configuration
+resources:
+- ../../base
+
+# Environment-specific namespace
+namespace: monitoring-exp
+
+# Environment-specific suffix
+nameSuffix: -exp
+
+# Environment-specific labels
+commonLabels:
+  environment: experimental
+  monitoring.io/env: experimental
+
+# Patches for experimental environment
+patches:
+- target:
+    kind: HelmRelease
+    name: vanillatstodo-monitoring
+  patch: |-
+    - op: replace
+      path: /spec/values/global/environment
+      value: experimental
+    - op: replace
+      path: /spec/values/prometheus-stack/prometheus/prometheusSpec/retention
+      value: 7d
+    - op: replace
+      path: /spec/values/prometheus-stack/prometheus/prometheusSpec/retentionSize
+      value: 2GB
+    - op: replace
+      path: /spec/values/prometheus-stack/prometheus/prometheusSpec/resources/limits/cpu
+      value: 300m
+    - op: replace
+      path: /spec/values/prometheus-stack/prometheus/prometheusSpec/resources/limits/memory
+      value: 1Gi
+    - op: replace
+      path: /spec/values/prometheus-stack/grafana/adminPassword
+      value: admin123
+    - op: replace
+      path: /spec/values/serviceMonitor/interval
+      value: 60s
+
+# ConfigMap patches for experimental-specific monitoring configs
+configMapGenerator:
+- name: monitoring-config
+  literals:
+  - environment=experimental
+  - retention=7d
+  - log_level=debug
+  - metrics_interval=60s

@@ -1,0 +1,98 @@
+# Base values for monitoring stack
+# This file contains the base configuration that will be extended by environment overlays
+
+# Global configuration
+global:
+  environment: base
+  project: vanillatstodo
+  cluster_name: vanillatstodo-cluster
+
+# Prometheus Stack Configuration (includes Prometheus + Grafana + AlertManager)
+prometheus:
+  enabled: true
+
+prometheus-stack:
+  # Prometheus configuration
+  prometheus:
+    prometheusSpec:
+      # Base storage configuration - will be overridden by overlays
+      retention: 15d
+      retentionSize: 5GB
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: [ "ReadWriteOnce" ]
+            resources:
+              requests:
+                storage: 10Gi
+
+      # Resource limits - conservative defaults
+      resources:
+        limits:
+          cpu: 500m
+          memory: 2Gi
+        requests:
+          cpu: 250m
+          memory: 1Gi
+
+  # Grafana configuration
+  grafana:
+    enabled: true
+    adminPassword: changeme
+    persistence:
+      enabled: true
+      size: 5Gi
+
+    # Resource limits
+    resources:
+      limits:
+        cpu: 200m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+  # AlertManager configuration
+  alertmanager:
+    enabled: true
+    alertmanagerSpec:
+      storage:
+        volumeClaimTemplate:
+          spec:
+            accessModes: [ "ReadWriteOnce" ]
+            resources:
+              requests:
+                storage: 2Gi
+
+      # Resource limits
+      resources:
+        limits:
+          cpu: 100m
+          memory: 256Mi
+        requests:
+          cpu: 50m
+          memory: 128Mi
+
+# ServiceMonitor for application monitoring
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 30s
+  scrapeTimeout: 10s
+
+# Additional monitoring tools
+node-exporter:
+  enabled: true
+
+kube-state-metrics:
+  enabled: true
+
+# Ingress configuration (disabled by default)
+ingress:
+  enabled: false
+  grafana:
+    enabled: false
+    host: grafana.local
+  prometheus:
+    enabled: false
+    host: prometheus.local

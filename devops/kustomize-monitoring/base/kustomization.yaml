@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: vanillatstodo-monitoring-base
+
+# Use Helm chart as the base resource
+helmCharts:
+- name: vanillatstodo-monitoring
+  releaseName: vanillatstodo-monitoring
+  version: 0.1.0
+  repo: file://../helm-chart-monitoring
+  valuesFile: values.yaml
+  includeCRDs: true
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: vanillatstodo-monitoring
+  app.kubernetes.io/component: monitoring
+  app.kubernetes.io/part-of: vanillatstodo
+
+# Resources to generate
+resources: []
+
+# Namespace where monitoring will be deployed
+namespace: monitoring
+
+# Allow name suffix to be added by overlays
+nameSuffix: ""
