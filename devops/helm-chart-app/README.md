@@ -1,102 +1,134 @@
 # Vanillatstodo Helm Chart
 
-This Helm chart replaces the legacy `devops/k8s/` directory for deploying the Vanillatstodo application.
+This Helm chart is part of a GitOps-ready Kustomize + Helm architecture for deploying the Vanillatstodo application.
+
+## 🚀 GitOps-Ready Architecture
+
+**✨ Kustomize + Helm Integration**  
+This chart works seamlessly with Kustomize overlays for environment-specific configurations, eliminating values file duplication and enabling true GitOps workflows.
+
+## Architecture Overview
+
+```
+devops/
+├── helm-chart-app/           # Helm chart (this directory)
+│   ├── Chart.yaml           # Chart metadata
+│   ├── values.yaml         # Base values
+│   └── templates/          # Kubernetes manifests
+└── kustomize/              # Kustomize configuration
+    ├── base/               # Base Kustomization using this Helm chart
+    └── overlays/           # Environment-specific configurations
+        ├── experimental/   # Development environment
+        ├── staging/        # Staging environment
+        └── production/     # Production environment
+```
 
 ## 🔒 Security-First Deployment Approach
 
 **⚠️ No shell scripts for security reasons**  
-All production deployments are managed exclusively through GitHub Actions for enhanced security, auditability, and consistency.
+All production deployments are managed exclusively through GitHub Actions and Kustomize for enhanced security, auditability, and consistency.
 
-## Migration from kubectl to Helm
+## Migration from Multiple Values Files to Kustomize
 
 ### Old Way (deprecated)
 
 ```bash
-kubectl apply -f devops/k8s/
+# Multiple values files approach (deprecated)
+helm upgrade --install vanillatstodo-exp ./devops/helm-chart-app -f ./devops/helm-chart-app/values-experimental.yaml
+helm upgrade --install vanillatstodo-staging ./devops/helm-chart-app -f ./devops/helm-chart-app/values-staging.yaml
+helm upgrade --install vanillatstodo-prod ./devops/helm-chart-app -f ./devops/helm-chart-app/values-production.yaml
 ```
 
-### New Way (GitHub Actions managed)
+### New Way (Kustomize + Helm)
 
-**Production & Staging:** Deployments are automatically triggered through GitHub Actions workflows.
+**Production & Staging:** Deployments are automatically triggered through GitHub Actions workflows using Kustomize.
 
-**Local Development Only:**
+```bash
+# Deploy using Kustomize overlays (recommended)
+kubectl apply -k ../../kustomize/overlays/experimental
+kubectl apply -k ../../kustomize/overlays/staging
+kubectl apply -k ../../kustomize/overlays/production
+```
+
+**Local Development:**
 
 ```bash
 # For development/testing purposes only
-helm upgrade --install vanillatstodo-exp ./devops/helm-chart-app -f ./devops/helm-chart-app/values-experimental.yaml
+helm upgrade --install vanillatstodo-dev ./devops/helm-chart-app
 ```
 
-**Alternative for team development:**
+## Environment Configurations
 
-```bash
-# Using Makefile (safer than shell scripts)
-make deploy-experimental
-make deploy-staging
-make deploy-production
-```
+Each environment is configured through Kustomize overlays that patch the base Helm chart:
 
-## Chart Structure
+- **Experimental**: 2 replicas, minimal resources for development
+- **Staging**: 2 replicas, staging-appropriate resources
+- **Production**: 3 replicas, production-grade resources and health checks
 
-```
-devops/helm-chart-app/
-├── Chart.yaml                    # Chart metadata
-├── values.yaml                   # Default values (production baseline)
-├── values-experimental.yaml      # Development/experimental environment
-├── values-staging.yaml          # Staging environment
-├── values-production.yaml       # Production environment
-└── templates/
-    ├── deployment.yaml          # Application deployment
-    └── service.yaml            # LoadBalancer service
-```
-
-## Environment-Specific Deployments
-
-Each environment has its own values file with appropriate resource allocations:
-
-- **Experimental**: 2 replicas, 100m-200m CPU, health checks disabled
-- **Staging**: 2 replicas, 150m-300m CPU, health checks disabled
-- **Production**: 3 replicas, 200m-500m CPU, health checks enabled
+All environment-specific values are managed in `../kustomize/overlays/*/kustomization.yaml` files.
 
 ## Useful Commands
 
 ```bash
-# Dry run to see what would be deployed
-helm template vanillatstodo ./devops/helm-chart-app -f ./devops/helm-chart-app/values-experimental.yaml
+# Preview what Kustomize will deploy
+kubectl kustomize ../kustomize/overlays/experimental
 
-# Validate chart
-helm lint ./devops/helm-chart-app
+# Validate the Helm chart
+helm lint ./
 
-# Check deployment status
-helm status vanillatstodo-exp
+# Test the chart with different values
+helm template vanillatstodo ./ --values values.yaml
 
-# Rollback deployment
-helm rollback vanillatstodo-exp 1
+# Check current deployments
+kubectl get all -l app.kubernetes.io/name=vanillatstodo
 
-# Uninstall
-helm uninstall vanillatstodo-exp
+# Rollback using Helm (if deployed via Helm)
+helm rollback vanillatstodo-dev 1
+
+# Remove deployment
+kubectl delete -k ../kustomize/overlays/experimental
 ```
 
-## Multi-Tenant Deployment
+## GitOps Integration
 
-For SaaS deployments, you can create client-specific values files:
+### ArgoCD Application
 
-```bash
-# Create client-specific values
-cp values-production.yaml values-client1.yaml
+This chart is designed to work seamlessly with ArgoCD:
 
-# Deploy for specific client (via GitHub Actions only)
-# Manual deployment for development only:
-helm upgrade --install client1-todo ./devops/helm-chart-app -f ./devops/helm-chart-app/values-client1.yaml
+```yaml
+# Example ArgoCD Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vanillatstodo-production
+spec:
+  source:
+    repoURL: https://github.com/your-org/vanillatstodo
+    path: devops/kustomize/overlays/production
+    targetRevision: main
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vanillatstodo-prod
 ```
+
+### Continuous Deployment
+
+GitHub Actions workflows automatically:
+
+1. Build and push Docker images
+2. Update Kustomize configurations with new image tags
+3. ArgoCD detects changes and deploys automatically
 
 ## 🔒 Security Best Practices
 
 ### Production Deployments
 
-- ✅ **GitHub Actions Only**: All production deployments managed via CI/CD
+- ✅ **GitOps Workflow**: All deployments managed via Kustomize + ArgoCD
 - ✅ **No Executable Scripts**: No shell scripts in production repositories
-- ✅ **Audit Trail**: All deployments logged and tracked
-- ✅ **Access Control**: Deployments require proper GitHub permissions
+- ✅ **Audit Trail**: All deployments logged and tracked through Git
+- ✅ **Access Control**: Deployments require proper Git and Kubernetes permissions
+- ✅ **Environment Isolation**: Clear separation between environments using namespaces
+- ✅ **Immutable Deployments**: Configuration changes tracked in Git history
 
 ### Development Guidelines
 

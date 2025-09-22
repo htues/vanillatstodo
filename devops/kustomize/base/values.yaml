@@ -1,0 +1,61 @@
+# Base values - environment-agnostic defaults
+# This replaces all the previous values-*.yaml files
+
+app:
+  name: vanillatstodo
+  version: "0.0.1"
+  environment: base # Will be overridden by overlays
+
+image:
+  repository: hftamayo/vanillatstodo
+  tag: "0.0.1" # Will be overridden by overlays
+  pullPolicy: IfNotPresent
+
+deployment:
+  replicas: 2 # Safe default, overridden by overlays
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 3000
+  annotations: {}
+
+healthChecks:
+  enabled: true
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 3000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 3000
+    initialDelaySeconds: 60
+    periodSeconds: 30
+
+monitoring:
+  prometheus:
+    scrape: "true"
+    port: "3000"
+
+security:
+  enabled: false
+  runAsNonRoot: false
+  runAsUser: 1000
+
+imagePullSecrets: []

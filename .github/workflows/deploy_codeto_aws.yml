@@ -64,6 +64,11 @@ jobs:
       with:
         version: "3.12.3"
 
+    - name: Install Kustomize
+      run: |
+        curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+        sudo mv kustomize /usr/local/bin/
+
     - name: Verify EKS Cluster
       run: |
         echo "🔍 Verifying EKS cluster..."
@@ -143,27 +148,28 @@ jobs:
         fi
         echo "✅ Docker image verified"
 
-    - name: Validate Helm Chart
+    - name: Validate Kustomize Configuration
       run: |
-        echo "🔍 Validating Helm chart..."
-        helm lint ./devops/helm-chart-app
-        echo "✅ Helm chart validation passed"
+        echo "🔍 Validating Kustomize configuration..."
+        kustomize build ./devops/kustomize/overlays/${{ env.ENVIRONMENT }} --dry-run
+        echo "✅ Kustomize validation passed"
 
-    - name: Deploy to EKS with Helm
+    - name: Deploy to EKS with Kustomize
       run: |
-        echo "🚀 Deploying application with Helm..."
+        echo "🚀 Deploying application with Kustomize + Helm..."
         echo "Environment: ${{ env.ENVIRONMENT }}"
-        echo "Release name: ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
-        echo "Values file: ./devops/helm-chart-app/values-${{ env.ENVIRONMENT }}.yaml"
+        echo "Overlay: ./devops/kustomize/overlays/${{ env.ENVIRONMENT }}"
         echo "Docker image: ${{ env.FULL_DOCKER_IMAGE }}"
 
-        helm upgrade --install ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} ./devops/helm-chart-app \
-          -f ./devops/helm-chart-app/values-${{ env.ENVIRONMENT }}.yaml \
-          --wait --timeout=600s \
-          --set app.name=${{ env.APP_NAME }} \
-          --set image.repository=${{ vars.DOCKER_REPOSITORY || 'hftamayo/vanillatstodo' }} \
-          --set image.tag=${{ env.DOCKER_TAG }} \
-          --set app.environment=${{ env.ENVIRONMENT }}
+        # Update image tag in the kustomization
+        cd ./devops/kustomize/overlays/${{ env.ENVIRONMENT }}
+        kustomize edit set image hftamayo/vanillatstodo:${{ env.DOCKER_TAG }}
+
+        # Deploy using kustomize
+        cd ../../../../
+        kustomize build ./devops/kustomize/overlays/${{ env.ENVIRONMENT }} | kubectl apply -f -
+
+        echo "✅ Deployment applied successfully"
 
     - name: Wait for Deployment
       run: |

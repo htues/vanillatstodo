@@ -1,0 +1,48 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Reference to base configuration
+bases:
+- ../../base
+
+# Environment-specific labels
+commonLabels:
+  environment: staging
+
+# Environment-specific annotations
+commonAnnotations:
+  environment: staging
+  cost-center: qa
+
+# Override Helm values for staging environment
+helmCharts:
+- name: vanillatstodo-app
+  releaseName: vanillatstodo-staging
+  valuesInline:
+    app:
+      environment: staging
+    deployment:
+      replicas: 2 # Production-like but smaller
+    resources:
+      requests:
+        cpu: "150m"
+        memory: "256Mi"
+      limits:
+        cpu: "300m"
+        memory: "512Mi"
+    service:
+      type: ClusterIP # Internal access only, use port-forward
+    healthChecks:
+      readinessProbe:
+        initialDelaySeconds: 30
+      livenessProbe:
+        initialDelaySeconds: 60
+    security:
+      enabled: true # Enhanced security for staging
+      runAsNonRoot: true
+      runAsUser: 1000
+
+# Dynamic image tag (will be set by CI/CD)
+images:
+- name: hftamayo/vanillatstodo
+  newTag: staging-latest

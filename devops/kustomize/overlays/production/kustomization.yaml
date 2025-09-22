@@ -1,0 +1,56 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Reference to base configuration
+bases:
+- ../../base
+
+# Environment-specific labels
+commonLabels:
+  environment: production
+
+# Environment-specific annotations
+commonAnnotations:
+  environment: production
+  cost-center: production
+  backup: enabled
+  monitoring: enhanced
+
+# Override Helm values for production environment
+helmCharts:
+- name: vanillatstodo-app
+  releaseName: vanillatstodo-production
+  valuesInline:
+    app:
+      environment: production
+    deployment:
+      replicas: 3 # High availability
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    service:
+      type: LoadBalancer
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+        service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
+    healthChecks:
+      readinessProbe:
+        initialDelaySeconds: 30
+      livenessProbe:
+        initialDelaySeconds: 60
+    security:
+      enabled: true # Full security for production
+      runAsNonRoot: true
+      runAsUser: 1000
+    monitoring:
+      prometheus:
+        scrape: "true"
+
+# Production uses stable tags
+images:
+- name: hftamayo/vanillatstodo
+  newTag: "0.0.1" # Stable production tag
