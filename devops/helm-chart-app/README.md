@@ -1,4 +1,16 @@
-# Vanillatstodo Helm Chart
+# Vanillats```
+
+devops/
+├── helm-chart-app/ # Helm chart (this directory)
+│ ├── Chart.yaml # Chart metadata
+│ ├── values.yaml # Base values
+│ └── templates/ # Kubernetes manifests
+└── kustomize-app/ # Kustomize configuration
+├── base/ # Base Kustomization using this Helm chart
+└── overlays/ # Environment-specific configurations
+├── experimental/ # Development environment
+├── staging/ # Staging environment  
+ └── production/ # Production environmentart
 
 This Helm chart is part of a GitOps-ready Kustomize + Helm architecture for deploying the Vanillatstodo application.
 
@@ -43,19 +55,17 @@ helm upgrade --install vanillatstodo-prod ./devops/helm-chart-app -f ./devops/he
 
 **Production & Staging:** Deployments are automatically triggered through GitHub Actions workflows using Kustomize.
 
-```bash
+````bash
 # Deploy using Kustomize overlays (recommended)
-kubectl apply -k ../../kustomize/overlays/experimental
-kubectl apply -k ../../kustomize/overlays/staging
-kubectl apply -k ../../kustomize/overlays/production
-```
-
-**Local Development:**
+kubectl apply -k ../../kustomize-app/overlays/experimental
+kubectl apply -k ../../kustomize-app/overlays/staging
+kubectl apply -k ../../kustomize-app/overlays/production
+```**Local Development:**
 
 ```bash
 # For development/testing purposes only
 helm upgrade --install vanillatstodo-dev ./devops/helm-chart-app
-```
+````
 
 ## Environment Configurations
 
@@ -65,13 +75,13 @@ Each environment is configured through Kustomize overlays that patch the base He
 - **Staging**: 2 replicas, staging-appropriate resources
 - **Production**: 3 replicas, production-grade resources and health checks
 
-All environment-specific values are managed in `../kustomize/overlays/*/kustomization.yaml` files.
+All environment-specific values are managed in `../kustomize-app/overlays/*/kustomization.yaml` files.
 
 ## Useful Commands
 
 ```bash
 # Preview what Kustomize will deploy
-kubectl kustomize ../kustomize/overlays/experimental
+kubectl kustomize ../kustomize-app/overlays/experimental
 
 # Validate the Helm chart
 helm lint ./
@@ -86,7 +96,7 @@ kubectl get all -l app.kubernetes.io/name=vanillatstodo
 helm rollback vanillatstodo-dev 1
 
 # Remove deployment
-kubectl delete -k ../kustomize/overlays/experimental
+kubectl delete -k ../kustomize-app/overlays/experimental
 ```
 
 ## GitOps Integration
@@ -104,7 +114,7 @@ metadata:
 spec:
   source:
     repoURL: https://github.com/your-org/vanillatstodo
-    path: devops/kustomize/overlays/production
+    path: devops/kustomize-app/overlays/production
     targetRevision: main
   destination:
     server: https://kubernetes.default.svc

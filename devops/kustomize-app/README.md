@@ -1,4 +1,17 @@
-# Kustomize + Helm GitOps Configuration
+# Kustomize +```
+
+kustomize-app/
+├── README.md # This file
+├── base/ # Base Kustomization using Helm chart
+│ ├── kustomization.yaml # Base Kustomize config
+│ └── values.yaml # Base Helm values
+└── overlays/ # Environment-specific configurations
+├── experimental/ # Development environment
+│ └── kustomization.yaml
+├── staging/ # Staging environment  
+ │ └── kustomization.yaml
+└── production/ # Production environment
+└── kustomization.yamlConfiguration
 
 This directory contains Kustomize configurations for deploying the Vanillatstodo application using a GitOps-ready architecture that combines Kustomize and Helm.
 
@@ -109,7 +122,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/your-org/vanillatstodo
-    path: devops/kustomize/overlays/production
+    path: devops/kustomize-app/overlays/production
     targetRevision: main
   destination:
     server: https://kubernetes.default.svc

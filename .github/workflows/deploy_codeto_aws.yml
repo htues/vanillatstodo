@@ -151,23 +151,23 @@ jobs:
     - name: Validate Kustomize Configuration
       run: |
         echo "🔍 Validating Kustomize configuration..."
-        kustomize build ./devops/kustomize/overlays/${{ env.ENVIRONMENT }} --dry-run
+        kustomize build ./devops/kustomize-app/overlays/${{ env.ENVIRONMENT }} --dry-run
         echo "✅ Kustomize validation passed"
 
     - name: Deploy to EKS with Kustomize
       run: |
         echo "🚀 Deploying application with Kustomize + Helm..."
         echo "Environment: ${{ env.ENVIRONMENT }}"
-        echo "Overlay: ./devops/kustomize/overlays/${{ env.ENVIRONMENT }}"
+        echo "Overlay: ./devops/kustomize-app/overlays/${{ env.ENVIRONMENT }}"
         echo "Docker image: ${{ env.FULL_DOCKER_IMAGE }}"
 
         # Update image tag in the kustomization
-        cd ./devops/kustomize/overlays/${{ env.ENVIRONMENT }}
+        cd ./devops/kustomize-app/overlays/${{ env.ENVIRONMENT }}
         kustomize edit set image hftamayo/vanillatstodo:${{ env.DOCKER_TAG }}
 
         # Deploy using kustomize
         cd ../../../../
-        kustomize build ./devops/kustomize/overlays/${{ env.ENVIRONMENT }} | kubectl apply -f -
+        kustomize build ./devops/kustomize-app/overlays/${{ env.ENVIRONMENT }} | kubectl apply -f -
 
         echo "✅ Deployment applied successfully"
 
