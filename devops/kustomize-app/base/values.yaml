@@ -1,14 +1,14 @@
 # Base values - environment-agnostic defaults
-# This replaces all the previous values-*.yaml files
+# Variables marked with PLACEHOLDER_ will be replaced by Kustomize from global.env
 
 app:
-  name: vanillatstodo
-  version: "0.0.1"
+  name: PLACEHOLDER_PROJECT_NAME
+  version: PLACEHOLDER_APP_VERSION
   environment: base # Will be overridden by overlays
 
 image:
-  repository: hftamayo/vanillatstodo
-  tag: "0.0.1" # Will be overridden by overlays
+  repository: PLACEHOLDER_DOCKER_REPOSITORY
+  tag: PLACEHOLDER_APP_VERSION # Will be overridden by overlays
   pullPolicy: IfNotPresent
 
 deployment:

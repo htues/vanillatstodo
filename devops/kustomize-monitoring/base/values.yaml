@@ -1,11 +1,12 @@
 # Base values for monitoring stack
 # This file contains the base configuration that will be extended by environment overlays
+# Variables marked with PLACEHOLDER_ will be replaced by Kustomize from global.env
 
 # Global configuration
 global:
   environment: base
-  project: vanillatstodo
-  cluster_name: vanillatstodo-cluster
+  project: PLACEHOLDER_PROJECT_NAME
+  cluster_name: PLACEHOLDER_CLUSTER_NAME
 
 # Prometheus Stack Configuration (includes Prometheus + Grafana + AlertManager)
 prometheus:
