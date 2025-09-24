@@ -10,7 +10,9 @@ prometheus-stack:
       retention: 15d
       retentionSize: 5GB
   grafana:
-    adminPassword: "staging-secure-password"
+    # Admin password will be injected by GitHub Actions via:
+    # --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }}
+    adminPassword: ""
     service:
       type: ClusterIP
 

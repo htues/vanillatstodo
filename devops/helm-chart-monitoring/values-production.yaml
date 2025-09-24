@@ -23,7 +23,9 @@ prometheus-stack:
           cpu: 500m
           memory: 2Gi
   grafana:
-    adminPassword: "production-super-secure-password"
+    # Admin password will be injected by GitHub Actions via:
+    # --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }}
+    adminPassword: ""
     persistence:
       size: 20Gi
     service:

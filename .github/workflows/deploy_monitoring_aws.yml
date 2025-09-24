@@ -105,7 +105,8 @@ jobs:
             --wait --timeout=600s \
             --set global.project=${{ env.APP_NAME }} \
             --set global.cluster_name=${{ env.CLUSTER_NAME }} \
-            --set global.environment=${{ env.ENVIRONMENT }}
+            --set global.environment=${{ env.ENVIRONMENT }} \
+            --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }}
 
       - name: Uninstall Monitoring Stack
         if: env.ACTION == 'uninstall'
