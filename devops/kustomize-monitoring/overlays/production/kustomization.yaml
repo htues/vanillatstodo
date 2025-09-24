@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 metadata:
-  name: vanillatstodo-monitoring-production
+  name: monitoring-production
 
 # Reference the base configuration
 resources:
@@ -12,7 +12,8 @@ resources:
 # Environment-specific namespace
 namespace: monitoring-prod
 
-# Environment-specific suffix
+# Dynamic naming using global config
+namePrefix: vanillatstodo-
 nameSuffix: -prod
 
 # Environment-specific labels
@@ -20,12 +21,14 @@ commonLabels:
   environment: production
   monitoring.io/env: production
   monitoring.io/criticality: high
+  app.kubernetes.io/name: vanillatstodo-monitoring
+  app.kubernetes.io/part-of: vanillatstodo
 
 # Patches for production environment
 patches:
 - target:
     kind: HelmRelease
-    name: vanillatstodo-monitoring
+    name: monitoring
   patch: |-
     - op: replace
       path: /spec/values/global/environment

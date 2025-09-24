@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 metadata:
-  name: vanillatstodo-monitoring-staging
+  name: monitoring-staging
 
 # Reference the base configuration
 resources:
@@ -11,19 +11,22 @@ resources:
 # Environment-specific namespace
 namespace: monitoring-staging
 
-# Environment-specific suffix
+# Dynamic naming using global config
+namePrefix: vanillatstodo-
 nameSuffix: -staging
 
 # Environment-specific labels
 commonLabels:
   environment: staging
   monitoring.io/env: staging
+  app.kubernetes.io/name: vanillatstodo-monitoring
+  app.kubernetes.io/part-of: vanillatstodo
 
 # Patches for staging environment
 patches:
 - target:
     kind: HelmRelease
-    name: vanillatstodo-monitoring
+    name: monitoring
   patch: |-
     - op: replace
       path: /spec/values/global/environment

@@ -2,12 +2,20 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 metadata:
-  name: vanillatstodo-monitoring-base
+  name: monitoring-base
+
+# Load global configuration
+configMapGenerator:
+- name: global-config
+  envs:
+  - ../../config/global.env
+  options:
+    disableNameSuffixHash: true
 
 # Use Helm chart as the base resource
 helmCharts:
-- name: vanillatstodo-monitoring
-  releaseName: vanillatstodo-monitoring
+- name: monitoring
+  releaseName: monitoring
   version: 0.1.0
   repo: file://../helm-chart-monitoring
   valuesFile: values.yaml
@@ -15,9 +23,32 @@ helmCharts:
 
 # Common labels applied to all resources
 commonLabels:
-  app.kubernetes.io/name: vanillatstodo-monitoring
   app.kubernetes.io/component: monitoring
-  app.kubernetes.io/part-of: vanillatstodo
+  app.kubernetes.io/managed-by: kustomize
+  app.kubernetes.io/version: "0.1.0"
+
+# Replace placeholders in values.yaml with global.env variables
+replacements:
+- source:
+    kind: ConfigMap
+    name: global-config
+    fieldPath: data.PROJECT_NAME
+  targets:
+  - select:
+      kind: HelmRelease
+      name: monitoring
+    fieldPaths:
+    - spec.values.global.project
+- source:
+    kind: ConfigMap
+    name: global-config
+    fieldPath: data.CLUSTER_NAME
+  targets:
+  - select:
+      kind: HelmRelease
+      name: monitoring
+    fieldPaths:
+    - spec.values.global.cluster_name
 
 # Resources to generate
 resources: []
@@ -25,5 +56,8 @@ resources: []
 # Namespace where monitoring will be deployed
 namespace: monitoring
 
-# Allow name suffix to be added by overlays
+# Name prefix (can be overridden by overlays)
+namePrefix: ""
+
+# Name suffix (can be overridden by overlays)  
 nameSuffix: ""
