@@ -1,0 +1,20 @@
+global:
+  environment: staging
+
+prometheus:
+  enabled: true
+
+prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      retention: 15d
+      retentionSize: 5GB
+  grafana:
+    adminPassword: "staging-secure-password"
+    service:
+      type: ClusterIP
+
+serviceMonitor:
+  interval: 30s
+
+

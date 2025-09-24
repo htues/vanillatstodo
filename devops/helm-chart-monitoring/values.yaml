@@ -3,7 +3,7 @@
 
 # Global configuration
 global:
-  environment: experimental
+  environment: base
   project: vanillatstodo
   cluster_name: vanillatstodo-cluster
 
@@ -44,7 +44,7 @@ prometheus-stack:
   # Grafana configuration
   grafana:
     enabled: true
-    adminPassword: "admin123" # Change this in production!
+    adminPassword: "changeme"
 
     # Persistence
     persistence:
@@ -54,7 +54,7 @@ prometheus-stack:
 
     # Service configuration for LoadBalancer access
     service:
-      type: LoadBalancer
+      type: ClusterIP
       port: 80
 
     # Resource limits

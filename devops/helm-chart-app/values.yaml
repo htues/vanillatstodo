@@ -5,7 +5,7 @@
 app:
   name: vanillatstodo
   version: "0.0.1"
-  environment: production
+  environment: base
 
 image:
   repository: hftamayo/vanillatstodo
@@ -13,7 +13,7 @@ image:
   pullPolicy: IfNotPresent
 
 deployment:
-  replicas: 3
+  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -29,15 +29,11 @@ resources:
     memory: "512Mi"
 
 service:
-  type: LoadBalancer
+  type: ClusterIP
   port: 80
   targetPort: 80
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
-    service.beta.kubernetes.io/aws-load-balancer-connection-draining-enabled: "true"
-    service.beta.kubernetes.io/aws-load-balancer-connection-draining-timeout: "60"
-  externalTrafficPolicy: Local
+  annotations: {}
+  externalTrafficPolicy: Cluster
 
 healthChecks:
   enabled: true
@@ -45,14 +41,14 @@ healthChecks:
     httpGet:
       path: /
       port: 80
-    initialDelaySeconds: 5
-    periodSeconds: 10
+    initialDelaySeconds: 15
+    periodSeconds: 15
   livenessProbe:
     httpGet:
       path: /
       port: 80
-    initialDelaySeconds: 15
-    periodSeconds: 20
+    initialDelaySeconds: 30
+    periodSeconds: 30
 
 security:
   enabled: true

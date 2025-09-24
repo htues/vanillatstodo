@@ -1,0 +1,24 @@
+global:
+  environment: experimental
+
+prometheus:
+  enabled: true
+
+prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      retention: 7d
+      retentionSize: 2GB
+      resources:
+        limits:
+          cpu: 300m
+          memory: 1Gi
+  grafana:
+    adminPassword: "admin123"
+    service:
+      type: LoadBalancer
+
+serviceMonitor:
+  interval: 60s
+
+
