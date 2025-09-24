@@ -1,4 +1,6 @@
 name: Deploy CodeBase to AWS
+# Summary: Helm-only deployment. Kustomize removed. Uses per-environment values files at
+# devops/helm-chart-app/values-${ENVIRONMENT}.yaml and sets image/tag via --set.
 
 on:
   # Remove automatic triggers - Manual only
@@ -64,10 +66,7 @@ jobs:
       with:
         version: "3.12.3"
 
-    - name: Install Kustomize
-      run: |
-        curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-        sudo mv kustomize /usr/local/bin/
+    # Kustomize no longer used (Helm-only)
 
     - name: Verify EKS Cluster
       run: |
@@ -148,51 +147,60 @@ jobs:
         fi
         echo "✅ Docker image verified"
 
-    - name: Validate Kustomize Configuration
+    - name: Prepare Helm Values
       run: |
-        echo "🔍 Validating Kustomize configuration..."
-        kustomize build ./devops/kustomize-app/overlays/${{ env.ENVIRONMENT }} --dry-run
-        echo "✅ Kustomize validation passed"
+        echo "📦 Selecting Helm values file..."
+        VALUES_FILE="devops/helm-chart-app/values-${{ env.ENVIRONMENT }}.yaml"
+        if [ ! -f "$VALUES_FILE" ]; then
+          echo "❌ Values file not found: $VALUES_FILE"
+          exit 1
+        fi
+        echo "VALUES_FILE=$VALUES_FILE" >> $GITHUB_ENV
 
-    - name: Deploy to EKS with Kustomize
+    - name: Deploy to EKS with Helm
       run: |
-        echo "🚀 Deploying application with Kustomize + Helm..."
+        echo "🚀 Deploying application with Helm..."
         echo "Environment: ${{ env.ENVIRONMENT }}"
-        echo "Overlay: ./devops/kustomize-app/overlays/${{ env.ENVIRONMENT }}"
-        echo "Docker image: ${{ env.FULL_DOCKER_IMAGE }}"
+        echo "Release: ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+        echo "Values: ${{ env.VALUES_FILE }}"
+        echo "Image: ${{ env.FULL_DOCKER_IMAGE }}"
 
-        # Update image tag in the kustomization
-        cd ./devops/kustomize-app/overlays/${{ env.ENVIRONMENT }}
-        kustomize edit set image hftamayo/vanillatstodo:${{ env.DOCKER_TAG }}
-
-        # Deploy using kustomize
-        cd ../../../../
-        kustomize build ./devops/kustomize-app/overlays/${{ env.ENVIRONMENT }} | kubectl apply -f -
-
-        echo "✅ Deployment applied successfully"
+        cd devops/helm-chart-app
+        helm dependency update || true
+        helm upgrade --install ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} . \
+          -f "${{ env.VALUES_FILE }}" \
+          --set image.repository=${{ vars.DOCKER_REPOSITORY || 'hftamayo/vanillatstodo' }} \
+          --set image.tag=${{ env.DOCKER_TAG }} \
+          --set app.name=${{ env.APP_NAME }} \
+          --set app.environment=${{ env.ENVIRONMENT }} \
+          --wait --timeout=600s
+        cd ../../
+        echo "✅ Helm deployment applied successfully"
 
     - name: Wait for Deployment
       run: |
-        echo "⏳ Waiting for Helm deployment to be ready..."
+        echo "⏳ Waiting for deployment to be ready..."
 
         # Check deployment status
-        if ! kubectl rollout status deployment/${{ env.APP_NAME }} --timeout=10m; then
+        # Try rollout by label selector in case resource name is templated
+        if ! kubectl rollout status deployment -l app=${{ env.APP_NAME }} --timeout=10m; then
           echo "❌ Deployment failed!"
           echo ""
           echo "🔍 Helm Release Status:"
           helm status ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}
           echo ""
           echo "🔍 Deployment Details:"
-          kubectl describe deployment/${{ env.APP_NAME }}
+          kubectl get deploy -l app=${{ env.APP_NAME }} -o wide || true
+          kubectl describe deploy -l app=${{ env.APP_NAME }} || true
           echo ""
           echo "🔍 Pod Status:"
-          kubectl get pods -l app=${{ env.APP_NAME }} -o wide
+          kubectl get pods -l app=${{ env.APP_NAME }} -o wide || true
           echo ""
           echo "🔍 Pod Events:"
-          kubectl describe pods -l app=${{ env.APP_NAME }}
+          kubectl describe pods -l app=${{ env.APP_NAME }} || true
           echo ""
           echo "🔍 Container Logs:"
-          kubectl logs -l app=${{ env.APP_NAME }} --tail=100 --all-containers=true
+          kubectl logs -l app=${{ env.APP_NAME }} --tail=100 --all-containers=true || true
           echo ""
           echo "🔍 Helm Release History:"
           helm history ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}
@@ -204,7 +212,13 @@ jobs:
       run: |
         echo "⏳ Waiting for LoadBalancer..."
         for i in {1..20}; do
-          EXTERNAL_IP=$(kubectl get svc ${{ env.APP_NAME }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          # Try to find the service by label
+          SVC_NAME=$(kubectl get svc -l app=${{ env.APP_NAME }} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "$SVC_NAME" ]; then
+            EXTERNAL_IP=$(kubectl get svc "$SVC_NAME" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+          else
+            EXTERNAL_IP=""
+          fi
           if [ -n "$EXTERNAL_IP" ]; then
             echo "SERVICE_URL=${EXTERNAL_IP}" >> $GITHUB_ENV
             echo "✅ Service URL: ${EXTERNAL_IP}"
