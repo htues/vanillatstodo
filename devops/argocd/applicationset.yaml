@@ -1,0 +1,34 @@
+# ArgoCD ApplicationSet for multi-environment deployment
+# File: devops/argocd/applicationset.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: vanillatstodo-environments
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - env: experimental
+      - env: staging
+      - env: production
+
+  template:
+    metadata:
+      name: 'vanillatstodo-{{env}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/hftamayo/vanillatstodo
+        targetRevision: HEAD
+        path: devops/kustomize-app/overlays/{{env}}
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: 'vanillatstodo-{{env}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true

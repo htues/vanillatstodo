@@ -1,0 +1,32 @@
+app:
+  environment: staging
+
+image:
+  tag: "staging-latest"
+
+deployment:
+  replicas: 2
+
+service:
+  type: ClusterIP
+
+resources:
+  requests:
+    cpu: "150m"
+    memory: "256Mi"
+  limits:
+    cpu: "300m"
+    memory: "512Mi"
+
+healthChecks:
+  readinessProbe:
+    initialDelaySeconds: 30
+  livenessProbe:
+    initialDelaySeconds: 60
+
+security:
+  enabled: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+

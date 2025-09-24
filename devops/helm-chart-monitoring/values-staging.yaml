@@ -1,0 +1,22 @@
+global:
+  environment: staging
+
+prometheus:
+  enabled: true
+
+prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      retention: 15d
+      retentionSize: 5GB
+  grafana:
+    # Admin password will be injected by GitHub Actions via:
+    # --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }}
+    adminPassword: ""
+    service:
+      type: ClusterIP
+
+serviceMonitor:
+  interval: 30s
+
+

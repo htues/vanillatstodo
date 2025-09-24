@@ -1,0 +1,30 @@
+app:
+  environment: experimental
+
+image:
+  tag: "experimental-latest"
+
+deployment:
+  replicas: 1
+
+service:
+  type: LoadBalancer
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "200m"
+    memory: "256Mi"
+
+healthChecks:
+  readinessProbe:
+    initialDelaySeconds: 10
+  livenessProbe:
+    initialDelaySeconds: 20
+
+security:
+  enabled: false
+
+

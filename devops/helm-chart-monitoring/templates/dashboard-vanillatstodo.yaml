@@ -1,0 +1,14 @@
+{{- if .Values.application.monitoring.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "monitoring-stack.fullname" . }}-dashboard-vanillatstodo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "monitoring-stack.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  vanillatstodo-app.json: |
+{{ (.Files.Get "dashboards/vanillatstodo-app.json") | indent 4 }}
+{{- end }}
+

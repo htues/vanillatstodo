@@ -1,0 +1,26 @@
+{{- if .Values.application.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "monitoring-stack.fullname" . }}-app-monitor
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "monitoring-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: {{ .Values.global.project }}
+  endpoints:
+  {{- range .Values.application.monitoring.serviceMonitor.endpoints }}
+  - port: {{ .port }}
+    path: {{ .path }}
+    interval: {{ .interval }}
+    {{- if .scheme }}
+    scheme: {{ .scheme }}
+    {{- end }}
+  {{- end }}
+  namespaceSelector:
+    matchNames:
+    - default
+{{- end }}

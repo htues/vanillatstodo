@@ -1,0 +1,208 @@
+name: Deploy Monitoring Stack to EKS
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy monitoring to"
+        required: true
+        default: "experimental"
+        type: choice
+        options:
+          - staging
+          - production
+          - experimental
+      action:
+        description: "Action to perform"
+        required: true
+        default: "install"
+        type: choice
+        options:
+          - install
+          - upgrade
+          - uninstall
+
+permissions:
+  id-token: write
+  contents: read
+  deployments: write
+
+env:
+  CLUSTER_NAME: ${{ vars.CLUSTER_NAME || 'vanillatstodo-cluster' }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+  APP_NAME: ${{ vars.APP_NAME || 'vanillatstodo' }}
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'experimental' }}
+  ACTION: ${{ github.event.inputs.action || 'install' }}
+
+jobs:
+  deploy-monitoring:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event.inputs.environment || 'experimental' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: "3.12.3"
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Verify Cluster Connection
+        run: |
+          echo "🔍 Verifying cluster connection..."
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Add Helm Repositories
+        run: |
+          echo "📦 Adding Helm repositories..."
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+
+      - name: Create Monitoring Namespace
+        run: |
+          echo "🏗️ Creating monitoring namespace..."
+          kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Install/Upgrade Monitoring Stack
+        if: env.ACTION == 'install' || env.ACTION == 'upgrade'
+        run: |
+          echo "🚀 ${{ env.ACTION }}ing monitoring stack..."
+          echo "Environment: ${{ env.ENVIRONMENT }}"
+          echo "Release name: ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}"
+          echo "Values file: ./devops/helm-chart-monitoring/values-${{ env.ENVIRONMENT }}.yaml"
+
+          # Download dependencies
+          cd devops/helm-chart-monitoring
+          helm dependency update
+
+          # Install or upgrade
+          helm upgrade --install ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} . \
+            --namespace monitoring \
+            -f values-${{ env.ENVIRONMENT }}.yaml \
+            --wait --timeout=600s \
+            --set global.project=${{ env.APP_NAME }} \
+            --set global.cluster_name=${{ env.CLUSTER_NAME }} \
+            --set global.environment=${{ env.ENVIRONMENT }} \
+            --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }}
+
+      - name: Uninstall Monitoring Stack
+        if: env.ACTION == 'uninstall'
+        run: |
+          echo "🗑️ Uninstalling monitoring stack..."
+          helm uninstall ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} \
+            --namespace monitoring || echo "Release not found"
+
+      - name: Wait for Monitoring Stack
+        if: env.ACTION == 'install' || env.ACTION == 'upgrade'
+        run: |
+          echo "⏳ Waiting for monitoring stack to be ready..."
+
+          # Wait for Prometheus
+          kubectl rollout status deployment/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-kube-prom-prometheus \
+            --namespace monitoring --timeout=10m || echo "Prometheus deployment not found"
+
+          # Wait for Grafana
+          kubectl rollout status deployment/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-grafana \
+            --namespace monitoring --timeout=10m
+
+          echo "✅ Monitoring stack is ready!"
+
+      - name: Get Monitoring Access Information
+        if: env.ACTION == 'install' || env.ACTION == 'upgrade'
+        id: monitoring_info
+        run: |
+          echo "📊 Getting monitoring access information..."
+
+          # Get Grafana service details
+          GRAFANA_SERVICE_TYPE=$(kubectl get svc ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-grafana \
+            --namespace monitoring -o jsonpath='{.spec.type}')
+
+          echo "GRAFANA_SERVICE_TYPE=${GRAFANA_SERVICE_TYPE}" >> $GITHUB_ENV
+
+          if [ "$GRAFANA_SERVICE_TYPE" = "LoadBalancer" ]; then
+            echo "⏳ Waiting for Grafana LoadBalancer..."
+            for i in {1..20}; do
+              GRAFANA_URL=$(kubectl get svc ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-grafana \
+                --namespace monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+              if [ -n "$GRAFANA_URL" ]; then
+                echo "GRAFANA_URL=http://${GRAFANA_URL}" >> $GITHUB_ENV
+                echo "✅ Grafana URL: http://${GRAFANA_URL}"
+                break
+              fi
+              echo "⏳ Waiting for Grafana external IP... (${i}/20)"
+              sleep 15
+            done
+          else
+            echo "GRAFANA_URL=kubectl port-forward" >> $GITHUB_ENV
+            echo "ℹ️ Grafana is accessible via: kubectl port-forward svc/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-grafana 3000:80 --namespace monitoring"
+          fi
+
+          # Get Prometheus URL
+          echo "PROMETHEUS_URL=kubectl port-forward" >> $GITHUB_ENV
+          echo "ℹ️ Prometheus is accessible via: kubectl port-forward svc/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-kube-prom-prometheus 9090:9090 --namespace monitoring"
+
+      - name: Verify Monitoring Health
+        if: env.ACTION == 'install' || env.ACTION == 'upgrade'
+        run: |
+          echo "🔍 Checking monitoring stack health..."
+
+          echo "📊 Monitoring Pods:"
+          kubectl get pods -n monitoring
+
+          echo ""
+          echo "📊 Monitoring Services:"
+          kubectl get svc -n monitoring
+
+          echo ""
+          echo "📊 Monitoring PVCs:"
+          kubectl get pvc -n monitoring
+
+      - name: Deployment Summary
+        if: always()
+        run: |
+          echo "### 📊 Monitoring Stack Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "| --------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Action | ${{ env.ACTION }} | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ env.ENVIRONMENT }} | ${{ env.AWS_REGION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster | ${{ env.CLUSTER_NAME }} | EKS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release Name | ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} | Helm Release |" >> $GITHUB_STEP_SUMMARY
+          echo "| Namespace | monitoring | Kubernetes |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ env.ACTION }}" != "uninstall" ]; then
+            echo "| Grafana Access | ${{ env.GRAFANA_URL || 'Port Forward' }} | Web UI |" >> $GITHUB_STEP_SUMMARY
+            echo "| Prometheus Access | ${{ env.PROMETHEUS_URL || 'Port Forward' }} | Web UI |" >> $GITHUB_STEP_SUMMARY
+            echo "| Default Login | admin / admin123 | Change in Production! |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Access Instructions" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ env.GRAFANA_URL }}" != "kubectl port-forward" ] && [ -n "${{ env.GRAFANA_URL }}" ]; then
+            echo "**Grafana URL:** ${{ env.GRAFANA_URL }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Grafana (Port Forward):** \`kubectl port-forward svc/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-grafana 3000:80 --namespace monitoring\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "**Prometheus (Port Forward):** \`kubectl port-forward svc/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-kube-prom-prometheus 9090:9090 --namespace monitoring\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Default Credentials:** admin / admin123" >> $GITHUB_STEP_SUMMARY

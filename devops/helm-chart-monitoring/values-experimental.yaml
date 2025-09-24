@@ -1,0 +1,26 @@
+global:
+  environment: experimental
+
+prometheus:
+  enabled: true
+
+prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      retention: 7d
+      retentionSize: 2GB
+      resources:
+        limits:
+          cpu: 300m
+          memory: 1Gi
+  grafana:
+    # Admin password will be injected by GitHub Actions via:
+    # --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }}
+    adminPassword: ""
+    service:
+      type: LoadBalancer
+
+serviceMonitor:
+  interval: 60s
+
+

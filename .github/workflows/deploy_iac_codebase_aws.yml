@@ -1,3 +1,4 @@
+# should be deprecated by GitOps
 name: "Deploy IaC and Codebase to AWS"
 
 on:
@@ -9,9 +10,10 @@ on:
       environment:
         description: "Environment to deploy to"
         required: true
-        default: "staging"
+        default: "experimental"
         type: choice
         options:
+          - experimental
           - staging
           - production
 
@@ -40,21 +42,47 @@ jobs:
     needs: setup
     uses: ./.github/workflows/deploy_iac_aws.yml
     with:
-      environment: ${{ inputs.environment || 'staging' }}
+      environment: ${{ inputs.environment || 'experimental' }}
     secrets: inherit
 
-  deploy_codebase:
+  wait_for_infrastructure:
     needs: deploy_infrastructure
-    if: needs.deploy_infrastructure.outputs.cluster_status == '✅'
+    if: needs.deploy_infrastructure.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Infrastructure Stabilization Wait
+        run: |
+          echo "⏳ Waiting for infrastructure to stabilize..."
+          echo "🔧 EKS cluster components need time to initialize:"
+          echo "   - Node groups joining the cluster"
+          echo "   - CNI networking setup"
+          echo "   - CoreDNS deployment"
+          echo "   - AWS Load Balancer Controller"
+          echo ""
+          echo "⏰ Starting 2-minute stabilization period..."
+
+          for i in {1..120}; do
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "⏳ $((120 - i)) seconds remaining..."
+            fi
+            sleep 1
+          done
+
+          echo "✅ Infrastructure stabilization period complete!"
+          echo "🚀 Ready to deploy application..."
+
+  deploy_codebase:
+    needs: [deploy_infrastructure, wait_for_infrastructure]
+    if: needs.deploy_infrastructure.result == 'success' && needs.wait_for_infrastructure.result == 'success'
     uses: ./.github/workflows/deploy_codeto_aws.yml
     with:
       cluster_name: ${{ needs.deploy_infrastructure.outputs.cluster_name }}
       cluster_endpoint: ${{ needs.deploy_infrastructure.outputs.cluster_endpoint }}
-      environment: ${{ inputs.environment || 'staging' }}
+      environment: ${{ inputs.environment || 'experimental' }}
     secrets: inherit
 
   deployment_summary:
-    needs: [deploy_infrastructure, deploy_codebase]
+    needs: [deploy_infrastructure, wait_for_infrastructure, deploy_codebase]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -63,8 +91,19 @@ jobs:
           echo "### Deployment Summary 🚀" >> $GITHUB_STEP_SUMMARY
           echo "| Component | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "| --------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
-          echo "| Infrastructure | ${{ needs.deploy_infrastructure.result }} | EKS Cluster |" >> $GITHUB_STEP_SUMMARY
-          echo "| Codebase | ${{ needs.deploy_codebase.result }} | Codebase Deployment |" >> $GITHUB_STEP_SUMMARY
+          echo "| Infrastructure | ${{ needs.deploy_infrastructure.result }} | EKS Cluster + Networking |" >> $GITHUB_STEP_SUMMARY
+          echo "| Stabilization | ${{ needs.wait_for_infrastructure.result }} | 2-minute wait period |" >> $GITHUB_STEP_SUMMARY
+          echo "| Codebase | ${{ needs.deploy_codebase.result }} | Application Deployment |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment**: ${{ inputs.environment || 'staging' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment**: ${{ inputs.environment || 'experimental' }}" >> $GITHUB_STEP_SUMMARY
           echo "**Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Add conditional messaging based on results
+          if [ "${{ needs.deploy_infrastructure.result }}" = "success" ] && [ "${{ needs.deploy_codebase.result }}" = "success" ]; then
+            echo "🎉 **Full deployment successful!** Your application is live." >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.deploy_infrastructure.result }}" = "success" ] && [ "${{ needs.deploy_codebase.result }}" != "success" ]; then
+            echo "⚠️ **Infrastructure deployed, but application deployment failed.** Run \`destroy_codeon_aws\` to clean up before retrying." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Infrastructure deployment failed.** Check logs and run \`destroy_iac\` if needed." >> $GITHUB_STEP_SUMMARY
+          fi

@@ -31,9 +31,9 @@ permissions:
   contents: read
 
 env:
-  CLUSTER_NAME: "vanillatstodo-cluster"
-  AWS_REGION: "us-east-2"
-  APP_NAME: "vanillatstodo"
+  CLUSTER_NAME: ${{ vars.CLUSTER_NAME || 'vanillatstodo-cluster' }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+  APP_NAME: ${{ vars.APP_NAME || 'vanillatstodo' }}
   ENVIRONMENT: ${{ github.event.inputs.environment }}
 
 jobs:
@@ -44,10 +44,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
-      - name: Load Environment Variables
-        run: |
-          cat .github/variables/environment.env >> $GITHUB_ENV
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -61,6 +57,11 @@ jobs:
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: "3.12.3"
 
       - name: Verify EKS Cluster
         run: |
@@ -82,6 +83,11 @@ jobs:
           echo "📊 Current Kubernetes Status:"
           echo "================================"
 
+          echo "🔍 Helm Releases:"
+          echo "🔍 Checking Helm releases..."
+          helm list -A | grep ${{ env.APP_NAME }} || echo "No Helm releases found"
+
+          echo ""
           echo "🔍 Deployments:"
           kubectl get deployments -l app=${{ env.APP_NAME }} -o wide || echo "No deployments found"
 
@@ -93,27 +99,38 @@ jobs:
           echo "🔍 Services:"
           kubectl get services -l app=${{ env.APP_NAME }} -o wide || echo "No services found"
 
-          echo ""
-          echo "🔍 ReplicaSets:"
-          kubectl get replicasets -l app=${{ env.APP_NAME }} -o wide || echo "No replicasets found"
-
-      - name: Cleanup Deployment
+      - name: Cleanup Helm Release
         if: github.event.inputs.cleanup_type == 'deployment' || github.event.inputs.cleanup_type == 'all-k8s'
         run: |
-          echo "🗑️ Cleaning up deployment..."
+          echo "🗑️ Cleaning up Helm release..."
 
-          # Delete deployment
-          if kubectl get deployment ${{ env.APP_NAME }} >/dev/null 2>&1; then
-            echo "✅ Found deployment ${{ env.APP_NAME }}, deleting..."
-            kubectl delete deployment ${{ env.APP_NAME }} --timeout=60s
-            echo "✅ Deployment deleted"
+          run: |
+          echo "🗑️ Uninstalling Helm releases..."
+
+          # List all app releases
+          RELEASES=$(helm list -A -o json | jq -r '.[] | select(.name | contains("${{ env.APP_NAME }}")) | .name' 2>/dev/null || echo "")
+
+          if [ ! -z "$RELEASES" ]; then
+            echo "✅ Found Helm releases:"
+            echo "$RELEASES"
+            
+            # Uninstall each release
+            echo "$RELEASES" | while read -r release; do
+              echo "🗑️ Uninstalling Helm release: $release"
+              helm uninstall "$release" --timeout=300s || true
+            done
+            
+            echo "⏳ Waiting for resources to be cleaned up..."
+            sleep 30
           else
-            echo "ℹ️ No deployment found"
+            echo "ℹ️ No Helm releases found"
           fi
 
-          # Wait for pods to terminate
-          echo "⏳ Waiting for pods to terminate..."
-          kubectl wait --for=delete pods -l app=${{ env.APP_NAME }} --timeout=120s || true
+          # Also clean up any resources that might remain
+          if kubectl get deployment ${{ env.APP_NAME }} >/dev/null 2>&1; then
+            echo "⚠️ Found remaining deployment, cleaning up manually..."
+            kubectl delete deployment ${{ env.APP_NAME }} --timeout=60s || true
+          fi
 
       - name: Cleanup Failed Pods
         if: github.event.inputs.cleanup_type == 'failed-pods' || github.event.inputs.cleanup_type == 'all-k8s'
@@ -208,6 +225,10 @@ jobs:
           echo "📊 Post-Cleanup Kubernetes Status:"
           echo "==================================="
 
+          echo "🔍 Helm Releases:"
+          helm list -A | grep ${{ env.APP_NAME }} || echo "✅ No Helm releases found"
+
+          echo ""
           echo "🔍 Deployments:"
           kubectl get deployments -l app=${{ env.APP_NAME }} -o wide || echo "✅ No deployments found"
 
@@ -218,10 +239,6 @@ jobs:
           echo ""
           echo "🔍 Services:"
           kubectl get services -l app=${{ env.APP_NAME }} -o wide || echo "✅ No services found"
-
-          echo ""
-          echo "🔍 ReplicaSets:"
-          kubectl get replicasets -l app=${{ env.APP_NAME }} -o wide || echo "✅ No replicasets found"
 
           echo ""
           echo "🔍 AWS LoadBalancer Status:"
@@ -249,15 +266,17 @@ jobs:
       - name: Cleanup Summary
         if: always()
         run: |
-          echo "### Cleanup Summary 🧹" >> $GITHUB_STEP_SUMMARY
+          echo "### 🧹 Helm Cleanup Summary" >> $GITHUB_STEP_SUMMARY
           echo "| Resource | Action | Status |" >> $GITHUB_STEP_SUMMARY
           echo "| -------- | ------ | ------ |" >> $GITHUB_STEP_SUMMARY
           echo "| Cleanup Type | ${{ github.event.inputs.cleanup_type }} | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | ${{ env.ENVIRONMENT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployment Method | Helm | Security Enhanced |" >> $GITHUB_STEP_SUMMARY
           echo "| Cluster | ${{ env.CLUSTER_NAME }} | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| Region | ${{ env.AWS_REGION }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Helm Releases | Uninstalled | All ${{ env.APP_NAME }} releases |" >> $GITHUB_STEP_SUMMARY
           echo "| LoadBalancer Cleanup | ✅ | AWS ELB/NLB deleted |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} | Job Status |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Cleanup completed!** LoadBalancers have been properly cleaned up." >> $GITHUB_STEP_SUMMARY
+          echo "**Helm cleanup completed!** All releases and LoadBalancers have been properly cleaned up." >> $GITHUB_STEP_SUMMARY
           echo "You can now safely run infrastructure destruction without dependency issues." >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,48 @@
+# ConfigMap-based environment configuration
+# File: devops/helm-chart-app/templates/configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.app.name }}-config
+  labels:
+    app: {{ .Values.app.name }}
+data:
+  # Base configuration
+  app.yaml: |
+    name: {{ .Values.app.name }}
+    version: {{ .Values.app.version }}
+    environment: {{ .Values.app.environment }}
+  
+  # Environment-specific overrides
+  {{- if eq .Values.app.environment "experimental" }}
+  experimental.yaml: |
+    replicas: 1
+    resources:
+      cpu: "100m"
+      memory: "128Mi"
+    monitoring:
+      enabled: false
+    healthChecks:
+      initialDelaySeconds: 10
+  {{- else if eq .Values.app.environment "staging" }}
+  staging.yaml: |
+    replicas: 2
+    resources:
+      cpu: "200m"
+      memory: "256Mi"
+    monitoring:
+      enabled: true
+    healthChecks:
+      initialDelaySeconds: 30
+  {{- else if eq .Values.app.environment "production" }}
+  production.yaml: |
+    replicas: 3
+    resources:
+      cpu: "500m"
+      memory: "512Mi"
+    monitoring:
+      enabled: true
+    healthChecks:
+      initialDelaySeconds: 60
+  {{- end }}

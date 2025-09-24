@@ -1,0 +1,17 @@
+apiVersion: v2
+name: vanillatstodo
+description: A Vanilla TypeScript Todo Application
+type: application
+version: 0.1.0
+appVersion: "0.0.1"
+keywords:
+  - todo
+  - typescript
+  - react
+  - frontend
+home: https://github.com/hftamayo/vanillatstodo
+sources:
+  - https://github.com/hftamayo/vanillatstodo
+maintainers:
+  - name: hftamayo
+    email: hftamayo@gmail.com
