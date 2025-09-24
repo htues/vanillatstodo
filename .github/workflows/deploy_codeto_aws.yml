@@ -168,7 +168,7 @@ jobs:
         cd devops/helm-chart-app
         helm dependency update || true
         helm upgrade --install ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} . \
-          -f "${{ env.VALUES_FILE }}" \
+          -f "values-${{ env.ENVIRONMENT }}.yaml" \
           --set image.repository=${{ vars.DOCKER_REPOSITORY || 'hftamayo/vanillatstodo' }} \
           --set image.tag=${{ env.DOCKER_TAG }} \
           --set app.name=${{ env.APP_NAME }} \
