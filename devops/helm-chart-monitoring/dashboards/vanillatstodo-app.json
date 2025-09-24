@@ -1,0 +1,74 @@
+{
+  "title": "VanillaTSTodo - App Overview",
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "HTTP RPS",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [{
+        "expr": "sum(rate(http_requests_total{job=\"vanillatstodo\"}[5m]))",
+        "legendFormat": "RPS"
+      }]
+    },
+    {
+      "type": "stat",
+      "title": "HTTP Error Rate (5xx %)",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "targets": [{
+        "expr": "100 * sum(rate(http_requests_total{job=\"vanillatstodo\",status=~\"5..\"}[5m])) / clamp_max(sum(rate(http_requests_total{job=\"vanillatstodo\"}[5m])), 1)",
+        "legendFormat": "5xx%"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP Latency (P50/P95/P99)",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"vanillatstodo\"}[5m])) by (le))", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"vanillatstodo\"}[5m])) by (le))", "legendFormat": "p95"},
+        {"expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"vanillatstodo\"}[5m])) by (le))", "legendFormat": "p99"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Pod Restarts",
+      "gridPos": {"x": 0, "y": 12, "w": 6, "h": 6},
+      "targets": [{
+        "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"default\",pod=~\"vanillatstodo-.*\"}[10m]))",
+        "legendFormat": "restarts"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Pod CPU (cores)",
+      "gridPos": {"x": 6, "y": 12, "w": 6, "h": 6},
+      "targets": [{
+        "expr": "sum(rate(container_cpu_usage_seconds_total{container!=\"POD\",pod=~\"vanillatstodo-.*\"}[5m]))",
+        "legendFormat": "cpu"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Pod Memory (MiB)",
+      "gridPos": {"x": 0, "y": 18, "w": 6, "h": 6},
+      "targets": [{
+        "expr": "sum(container_memory_working_set_bytes{container!=\"POD\",pod=~\"vanillatstodo-.*\"}) / 1024 / 1024",
+        "legendFormat": "mem"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Readiness Failures",
+      "gridPos": {"x": 6, "y": 18, "w": 6, "h": 6},
+      "targets": [{
+        "expr": "sum(increase(probe_success{job=\"blackbox\",instance=~\"vanillatstodo.*\"}[10m]) == 0)",
+        "legendFormat": "readiness_failures"
+      }]
+    }
+  ],
+  "templating": {"list": []}
+}
+
