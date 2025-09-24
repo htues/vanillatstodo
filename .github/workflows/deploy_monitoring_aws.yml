@@ -73,6 +73,11 @@ jobs:
           echo "🔍 Verifying cluster connection..."
           kubectl cluster-info
           kubectl get nodes
+          
+          echo ""
+          echo "🔍 Checking cluster resources..."
+          kubectl top nodes || echo "❌ Metrics server not available"
+          kubectl get nodes -o custom-columns=NAME:.metadata.name,STATUS:.status.conditions[-1].type,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory
 
       - name: Add Helm Repositories
         run: |
@@ -99,15 +104,23 @@ jobs:
           helm dependency update
 
           # Install or upgrade
+          echo "🔍 Installing with reduced resource requirements for experimental environment..."
           helm upgrade --install ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} . \
             --namespace monitoring \
             -f values-${{ env.ENVIRONMENT }}.yaml \
             --wait --timeout=1200s \
-            --atomic \
             --set global.project=${{ env.APP_NAME }} \
             --set global.cluster_name=${{ env.CLUSTER_NAME }} \
             --set global.environment=${{ env.ENVIRONMENT }} \
-            --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }}
+            --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }} \
+            --set prometheus-stack.prometheus.prometheusSpec.resources.limits.cpu=500m \
+            --set prometheus-stack.prometheus.prometheusSpec.resources.limits.memory=1Gi \
+            --set prometheus-stack.prometheus.prometheusSpec.resources.requests.cpu=200m \
+            --set prometheus-stack.prometheus.prometheusSpec.resources.requests.memory=512Mi \
+            --set prometheus-stack.grafana.resources.limits.cpu=200m \
+            --set prometheus-stack.grafana.resources.limits.memory=512Mi \
+            --set prometheus-stack.grafana.resources.requests.cpu=100m \
+            --set prometheus-stack.grafana.resources.requests.memory=256Mi
 
       - name: Uninstall Monitoring Stack
         if: env.ACTION == 'uninstall'
