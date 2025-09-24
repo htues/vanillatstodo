@@ -1,22 +1,70 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+metadata:
+  name: app-base
+
+# Load global configuration
+configMapGenerator:
+- name: global-config
+  envs:
+  - ../../config/global.env
+  options:
+    disableNameSuffixHash: true
+
 # Use our existing Helm chart as the base
 helmCharts:
-- name: vanillatstodo-app
-  releaseName: vanillatstodo
+- name: app
+  releaseName: app
   includeCRDs: false
   valuesFile: values.yaml
-  chartHome: ../../helm-chart-app
+  repo: file://../helm-chart-app
 
 # Common labels applied to all resources
 commonLabels:
-  app.kubernetes.io/name: vanillatstodo
+  app.kubernetes.io/component: application
   app.kubernetes.io/managed-by: kustomize
+  app.kubernetes.io/version: "0.1.0"
 
-# Common annotations
-commonAnnotations:
-  app.kubernetes.io/version: "0.0.1"
+# Replace placeholders in values.yaml with global.env variables
+replacements:
+- source:
+    kind: ConfigMap
+    name: global-config
+    fieldPath: data.PROJECT_NAME
+  targets:
+  - select:
+      kind: HelmRelease
+      name: app
+    fieldPaths:
+    - spec.values.app.name
+- source:
+    kind: ConfigMap
+    name: global-config
+    fieldPath: data.APP_VERSION
+  targets:
+  - select:
+      kind: HelmRelease
+      name: app
+    fieldPaths:
+    - spec.values.app.version
+    - spec.values.image.tag
+- source:
+    kind: ConfigMap
+    name: global-config
+    fieldPath: data.DOCKER_REPOSITORY
+  targets:
+  - select:
+      kind: HelmRelease
+      name: app
+    fieldPaths:
+    - spec.values.image.repository
 
 # Namespace for all resources
 namespace: default
+
+# Name prefix (can be overridden by overlays)
+namePrefix: ""
+
+# Name suffix (can be overridden by overlays)
+nameSuffix: ""

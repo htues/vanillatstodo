@@ -1,13 +1,25 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+metadata:
+  name: app-production
+
 # Reference to base configuration
-bases:
+resources:
 - ../../base
+
+# Environment-specific namespace
+namespace: vanillatstodo-prod
+
+# Dynamic naming using global config
+namePrefix: vanillatstodo-
+nameSuffix: -prod
 
 # Environment-specific labels
 commonLabels:
   environment: production
+  app.kubernetes.io/name: vanillatstodo
+  app.kubernetes.io/part-of: vanillatstodo
 
 # Environment-specific annotations
 commonAnnotations:
@@ -18,8 +30,8 @@ commonAnnotations:
 
 # Override Helm values for production environment
 helmCharts:
-- name: vanillatstodo-app
-  releaseName: vanillatstodo-production
+- name: app
+  releaseName: app
   valuesInline:
     app:
       environment: production

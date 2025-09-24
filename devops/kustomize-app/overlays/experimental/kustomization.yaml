@@ -1,13 +1,25 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+metadata:
+  name: app-experimental
+
 # Reference to base configuration
-bases:
+resources:
 - ../../base
+
+# Environment-specific namespace
+namespace: vanillatstodo-exp
+
+# Dynamic naming using global config
+namePrefix: vanillatstodo-
+nameSuffix: -exp
 
 # Environment-specific labels
 commonLabels:
   environment: experimental
+  app.kubernetes.io/name: vanillatstodo
+  app.kubernetes.io/part-of: vanillatstodo
 
 # Environment-specific annotations
 commonAnnotations:
@@ -16,8 +28,8 @@ commonAnnotations:
 
 # Override Helm values for experimental environment
 helmCharts:
-- name: vanillatstodo-app
-  releaseName: vanillatstodo-experimental
+- name: app
+  releaseName: app
   valuesInline:
     app:
       environment: experimental

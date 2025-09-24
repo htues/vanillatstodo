@@ -1,13 +1,25 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+metadata:
+  name: app-staging
+
 # Reference to base configuration
-bases:
+resources:
 - ../../base
+
+# Environment-specific namespace
+namespace: vanillatstodo-staging
+
+# Dynamic naming using global config
+namePrefix: vanillatstodo-
+nameSuffix: -staging
 
 # Environment-specific labels
 commonLabels:
   environment: staging
+  app.kubernetes.io/name: vanillatstodo
+  app.kubernetes.io/part-of: vanillatstodo
 
 # Environment-specific annotations
 commonAnnotations:
@@ -16,8 +28,8 @@ commonAnnotations:
 
 # Override Helm values for staging environment
 helmCharts:
-- name: vanillatstodo-app
-  releaseName: vanillatstodo-staging
+- name: app
+  releaseName: app
   valuesInline:
     app:
       environment: staging
