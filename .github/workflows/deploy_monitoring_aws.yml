@@ -102,7 +102,8 @@ jobs:
           helm upgrade --install ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} . \
             --namespace monitoring \
             -f values-${{ env.ENVIRONMENT }}.yaml \
-            --wait --timeout=600s \
+            --wait --timeout=1200s \
+            --atomic \
             --set global.project=${{ env.APP_NAME }} \
             --set global.cluster_name=${{ env.CLUSTER_NAME }} \
             --set global.environment=${{ env.ENVIRONMENT }} \
