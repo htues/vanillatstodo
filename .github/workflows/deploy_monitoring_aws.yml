@@ -114,6 +114,14 @@ jobs:
 
           # Install or upgrade with debug and non-fatal exit to allow diagnostics
           echo "🔍 Installing (with debug) and capturing failure details if any..."
+          # Detect default StorageClass to avoid unbound PVCs
+          DEFAULT_SC=$(kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{"\n"}{end}')
+          if [ -z "$DEFAULT_SC" ]; then
+            echo "⚠️ No default StorageClass detected. Falling back to 'gp3' (EKS default)."
+            DEFAULT_SC="gp3"
+          else
+            echo "✅ Default StorageClass detected: $DEFAULT_SC"
+          fi
           set +e
           helm upgrade --install ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} . \
             --namespace monitoring \
@@ -124,6 +132,8 @@ jobs:
             --set global.cluster_name=${{ env.CLUSTER_NAME }} \
             --set global.environment=${{ env.ENVIRONMENT }} \
             --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }} \
+            --set prometheus-stack.grafana.persistence.storageClassName=$DEFAULT_SC \
+            --set prometheus-stack.prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName=$DEFAULT_SC \
             --set prometheus-stack.prometheus.prometheusSpec.resources.limits.cpu=500m \
             --set prometheus-stack.prometheus.prometheusSpec.resources.limits.memory=1Gi \
             --set prometheus-stack.prometheus.prometheusSpec.resources.requests.cpu=200m \
