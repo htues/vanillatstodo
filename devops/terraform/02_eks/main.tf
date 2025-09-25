@@ -51,6 +51,11 @@ resource "aws_eks_cluster" "main" {
     security_group_ids      = [aws_security_group.eks_cluster.id]
   }
 
+  # Enable modern EKS authentication via API while maintaining ConfigMap compatibility
+  access_config {
+    authentication_mode = "API_AND_CONFIG_MAP"
+  }
+
   tags = merge(local.common_tags, {
     Name    = "${var.environment}-${var.project_name}-${var.cluster_name}"
     Version = "1.31"
