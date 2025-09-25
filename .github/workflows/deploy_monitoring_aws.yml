@@ -97,6 +97,11 @@ jobs:
           echo "🧰 Inspecting storage classes and default class..."
           kubectl get storageclass
           kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}* { .metadata.name }{"\n"}{end}' || true
+          
+          echo "🔍 Checking EBS CSI driver status..."
+          kubectl get pods -n kube-system | grep ebs-csi || echo "❌ EBS CSI driver not found"
+          kubectl get csidriver ebs.csi.aws.com || echo "❌ EBS CSI driver not registered"
+          
           echo "🧾 Recent events in monitoring namespace (if exists)"
           kubectl get events -n monitoring --sort-by=.lastTimestamp | tail -n 100 || true
 
@@ -114,11 +119,22 @@ jobs:
 
           # Install or upgrade with debug and non-fatal exit to allow diagnostics
           echo "🔍 Installing (with debug) and capturing failure details if any..."
-          # Detect default StorageClass to avoid unbound PVCs
+          # Detect working StorageClass (prefer gp3, fallback to gp2, then any available)
           DEFAULT_SC=$(kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{"\n"}{end}')
           if [ -z "$DEFAULT_SC" ]; then
-            echo "⚠️ No default StorageClass detected. Falling back to 'gp3' (EKS default)."
-            DEFAULT_SC="gp3"
+            # Try gp3 first (newer, better performance)
+            if kubectl get storageclass gp3 >/dev/null 2>&1; then
+              DEFAULT_SC="gp3"
+              echo "✅ Using gp3 StorageClass"
+            # Fallback to gp2
+            elif kubectl get storageclass gp2 >/dev/null 2>&1; then
+              DEFAULT_SC="gp2"
+              echo "⚠️ Using gp2 StorageClass (gp3 not available)"
+            # Last resort: use any available
+            else
+              DEFAULT_SC=$(kubectl get storageclass -o jsonpath='{.items[0].metadata.name}')
+              echo "⚠️ Using first available StorageClass: $DEFAULT_SC"
+            fi
           else
             echo "✅ Default StorageClass detected: $DEFAULT_SC"
           fi
