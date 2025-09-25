@@ -91,6 +91,15 @@ jobs:
           echo "🏗️ Creating monitoring namespace..."
           kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Inspect Storage and Events
+        if: env.ACTION == 'install' || env.ACTION == 'upgrade'
+        run: |
+          echo "🧰 Inspecting storage classes and default class..."
+          kubectl get storageclass
+          kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}* { .metadata.name }{"\n"}{end}' || true
+          echo "🧾 Recent events in monitoring namespace (if exists)"
+          kubectl get events -n monitoring --sort-by=.lastTimestamp | tail -n 100 || true
+
       - name: Install/Upgrade Monitoring Stack
         if: env.ACTION == 'install' || env.ACTION == 'upgrade'
         run: |
@@ -103,12 +112,14 @@ jobs:
           cd devops/helm-chart-monitoring
           helm dependency update
 
-          # Install or upgrade
-          echo "🔍 Installing with reduced resource requirements for experimental environment..."
+          # Install or upgrade with debug and non-fatal exit to allow diagnostics
+          echo "🔍 Installing (with debug) and capturing failure details if any..."
+          set +e
           helm upgrade --install ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} . \
             --namespace monitoring \
             -f values-${{ env.ENVIRONMENT }}.yaml \
             --wait --timeout=1200s \
+            --debug \
             --set global.project=${{ env.APP_NAME }} \
             --set global.cluster_name=${{ env.CLUSTER_NAME }} \
             --set global.environment=${{ env.ENVIRONMENT }} \
@@ -121,6 +132,29 @@ jobs:
             --set prometheus-stack.grafana.resources.limits.memory=512Mi \
             --set prometheus-stack.grafana.resources.requests.cpu=100m \
             --set prometheus-stack.grafana.resources.requests.memory=256Mi
+          HELM_EXIT_CODE=$?
+          set -e
+
+          if [ "$HELM_EXIT_CODE" -ne 0 ]; then
+            echo "❌ Helm reported failure (exit $HELM_EXIT_CODE). Collecting diagnostics..."
+            echo "--- Helm Release Status ---"
+            helm status ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} --namespace monitoring || true
+            echo "--- Helm Get All ---"
+            helm get all ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} --namespace monitoring || true
+            echo "--- Kubernetes: Pods ---"
+            kubectl get pods -n monitoring -o wide || true
+            echo "--- Kubernetes: Describe Pods (problematic) ---"
+            for p in $(kubectl get pods -n monitoring --no-headers | awk '$3!="Running" || $4>0 {print $1}'); do
+              echo "Describing $p"; kubectl describe pod $p -n monitoring || true; done
+            echo "--- Kubernetes: Events ---"
+            kubectl get events -n monitoring --sort-by=.lastTimestamp | tail -n 200 || true
+            echo "--- Kubernetes: PVCs ---"
+            kubectl get pvc -n monitoring -o wide || true
+            echo "--- Kubernetes: Pending Pods with scheduling details ---"
+            kubectl get pod -n monitoring -o json | jq -r '.items[] | select(.status.phase=="Pending") | .metadata.name' | while read name; do
+              echo "Pod: $name"; kubectl describe pod -n monitoring "$name" | sed -n '/Events:/,$p' || true; done
+            exit $HELM_EXIT_CODE
+          fi
 
       - name: Uninstall Monitoring Stack
         if: env.ACTION == 'uninstall'
