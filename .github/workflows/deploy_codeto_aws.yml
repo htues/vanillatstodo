@@ -48,10 +48,33 @@ jobs:
         echo "DOCKER_TAG=${DOCKER_TAG}" >> $GITHUB_ENV
         echo "FULL_DOCKER_IMAGE=${{ vars.DOCKER_REPOSITORY || 'hftamayo/vanillatstodo' }}:${DOCKER_TAG}" >> $GITHUB_ENV
 
-    - name: Configure AWS credentials
+    - name: Get IAM Role ARN
+      id: iam_role_arn
+      run: |
+        # Try to get role ARN from IAM Terraform state
+        cd devops/terraform/04_iam
+        terraform init -reconfigure \
+          -backend-config="bucket=${{ vars.BUCKET_NAME || 'vanillatstodo-terraform-state' }}" \
+          -backend-config="key=${{ env.ENVIRONMENT }}/iam/terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}" \
+          -backend-config="encrypt=true" >/dev/null 2>&1 || true
+        
+        # Check if IAM resources exist and get role ARN
+        if terraform output -raw github_actions_role_arn 2>/dev/null; then
+          ROLE_ARN=$(terraform output -raw github_actions_role_arn)
+          echo "github_actions_role_arn=${ROLE_ARN}" >> $GITHUB_OUTPUT
+          echo "✅ Found IAM role ARN: ${ROLE_ARN}"
+        else
+          # Fallback to secret if IAM state not available
+          ROLE_ARN="${{ secrets.AWS_ROLE_ARN }}"
+          echo "github_actions_role_arn=${ROLE_ARN}" >> $GITHUB_OUTPUT
+          echo "⚠️ Using fallback role ARN from secrets"
+        fi
+
+    - name: Configure AWS credentials (OIDC)
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        role-to-assume: ${{ steps.iam_role_arn.outputs.github_actions_role_arn }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Install kubectl
@@ -89,7 +112,7 @@ jobs:
         aws eks update-kubeconfig \
           --name ${{ env.CLUSTER_NAME }} \
           --region ${{ env.AWS_REGION }} \
-          --role-arn ${{ secrets.AWS_ROLE_ARN }}
+          --role-arn ${{ steps.iam_role_arn.outputs.github_actions_role_arn }}
 
     - name: Verify Cluster Health
       run: |
