@@ -45,56 +45,26 @@ resource "aws_iam_role" "github_actions_deployer" {
   })
 }
 
-# Attach EKS policies to the GitHub Actions role
-resource "aws_iam_role_policy_attachment" "github_actions_eks_cluster" {
-  role       = aws_iam_role.github_actions_deployer.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+# Attach EKS managed policies to the GitHub Actions role
+locals {
+  eks_policies = jsondecode(file("${path.module}/aws_policies/eks-managed-policies.json"))
 }
 
-resource "aws_iam_role_policy_attachment" "github_actions_eks_worker" {
+resource "aws_iam_role_policy_attachment" "github_actions_eks_policies" {
+  for_each = {
+    for policy in local.eks_policies.policies : policy.name => policy
+  }
+  
   role       = aws_iam_role.github_actions_deployer.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  policy_arn = each.value.arn
 }
 
-resource "aws_iam_role_policy_attachment" "github_actions_eks_cni" {
-  role       = aws_iam_role.github_actions_deployer.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-}
-
-resource "aws_iam_role_policy_attachment" "github_actions_ecr" {
-  role       = aws_iam_role.github_actions_deployer.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-}
-
-# Additional EKS permissions for deployment
-resource "aws_iam_role_policy_attachment" "github_actions_eks_vpc_cni" {
-  role       = aws_iam_role.github_actions_deployer.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
-}
-
-# Custom policy for additional EKS operations
-resource "aws_iam_role_policy" "github_actions_eks_custom" {
-  name = "GitHubActionsEKSCustom"
+# Custom policy for comprehensive deployment operations
+resource "aws_iam_role_policy" "github_actions_deployer_custom" {
+  name = "GitHubActionsDeployerCustom"
   role = aws_iam_role.github_actions_deployer.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "eks:DescribeCluster",
-          "eks:ListClusters",
-          "eks:UpdateKubeconfig",
-          "eks:DescribeNodegroup",
-          "eks:ListNodegroups",
-          "iam:ListRoles",
-          "iam:PassRole"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
+  policy = file("${path.module}/aws_policies/github-actions-deployer-policy.json")
 }
 
 # Local variables
