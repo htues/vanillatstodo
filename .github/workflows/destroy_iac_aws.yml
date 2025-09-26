@@ -44,7 +44,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS Credentials (Initial - for IAM setup)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -55,6 +55,39 @@ jobs:
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Get IAM Role ARN (before destroying IAM resources)
+        id: iam_role_arn
+        run: |
+          cd devops/terraform/04_iam
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/iam/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+          
+          # Check if IAM resources exist before trying to get ARN
+          if terraform output -raw github_actions_role_arn 2>/dev/null; then
+            ROLE_ARN=$(terraform output -raw github_actions_role_arn)
+            echo "github_actions_role_arn=${ROLE_ARN}" >> $GITHUB_OUTPUT
+            echo "✅ Found IAM role ARN: ${ROLE_ARN}"
+          else
+            echo "⚠️ IAM resources not found or already destroyed"
+            echo "github_actions_role_arn=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Switch to OIDC Authentication (if IAM role exists)
+        if: steps.iam_role_arn.outputs.github_actions_role_arn != ''
+        run: |
+          echo "🔄 Switching from access keys to OIDC authentication..."
+          echo "Role ARN: ${{ steps.iam_role_arn.outputs.github_actions_role_arn }}"
+
+      - name: Configure AWS credentials (OIDC)
+        if: steps.iam_role_arn.outputs.github_actions_role_arn != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.iam_role_arn.outputs.github_actions_role_arn }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Destroy State Resources
         id: state
@@ -1108,6 +1141,31 @@ jobs:
               echo "NETWORK_STATUS=❌" >> $GITHUB_ENV
             fi
           }
+
+      - name: Destroy IAM Resources (OIDC cleanup)
+        id: iam_cleanup
+        run: |
+          echo "🗑️ Destroying IAM resources (OIDC setup)..."
+          cd devops/terraform/04_iam
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/iam/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+          
+          # Check if IAM resources still exist
+          if terraform output -raw github_actions_role_arn 2>/dev/null; then
+            echo "✅ IAM resources found, proceeding with destruction..."
+            terraform destroy -auto-approve \
+              -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="project_name=${{ env.PROJECT_NAME }}" \
+              -var="environment=${{ env.ENVIRONMENT }}" \
+              -var="github_owner=hftamayo" \
+              -var="github_repo=vanillatstodo"
+            echo "✅ IAM resources destroyed successfully"
+          else
+            echo "ℹ️ IAM resources not found or already destroyed"
+          fi
 
       - name: Clean Up S3 Resources
         id: s3_cleanup
