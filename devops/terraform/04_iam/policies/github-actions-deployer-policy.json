@@ -1,0 +1,254 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "S3StateManagement",
+            "Effect": "Allow",
+            "Action": [
+                "s3:CreateBucket",
+                "s3:ListBucket",
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:GetBucketLocation",
+                "s3:GetAccelerateConfiguration",
+                "s3:GetBucketVersioning",
+                "s3:GetBucketPolicyStatus",
+                "s3:GetBucketVersioning",
+                "s3:PutBucketVersioning",
+                "s3:GetBucketTagging",
+                "s3:PutBucketTagging",
+                "s3:GetBucketLogging",
+                "s3:GetEncryptionConfiguration",
+                "s3:GetBucketAcl",
+                "s3:PutBucketAcl",
+                "s3:GetBucketCORS",
+                "s3:PutBucketCORS",
+                "s3:GetBucketWebsite",
+                "s3:PutBucketWebsite",
+                "s3:DeleteBucketWebsite",
+                "s3:GetBucketRequestPayment",
+                "s3:GetLifecycleConfiguration"
+            ],
+            "Resource": [
+                "arn:aws:s3:::vanillatstodo-terraform-state",
+                "arn:aws:s3:::vanillatstodo-terraform-state/*",
+                "arn:aws:s3:::vanillatstodo-terraform-state/env:/staging/*",
+                "arn:aws:s3:::vanillatstodo-terraform-state/env:/production/*"
+            ]
+        },
+        {
+            "Sid": "S3GlobalOperations",
+            "Effect": "Allow",
+            "Action": [
+                "s3:ListAllMyBuckets"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "EC2Management",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:*Vpc",
+                "ec2:*Subnet",
+                "ec2:*InternetGateway",
+                "ec2:*RouteTable",
+                "ec2:*NetworkInterface",
+                "ec2:*SecurityGroup*",
+                "ec2:*Tags",
+                "ec2:*DhcpOptions",
+                "ec2:*NatGateway",
+                "ec2:*VpcEndpoint",
+                "ec2:*VpcPeeringConnection",
+                "ec2:DescribeVpcs",
+                "ec2:ModifyVpcAttribute",
+                "ec2:DescribeVpcAttribute",
+                "ec2:DescribeSubnets",
+                "ec2:DescribeInternetGateways",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:DeleteNetworkInterface",
+                "ec2:DetachNetworkInterface",
+                "ec2:DescribeRouteTables",
+                "ec2:CreateRoute",
+                "ec2:DeleteRoute",
+                "ec2:CreateRouteTable",
+                "ec2:DeleteRouteTable",
+                "ec2:AssociateRouteTable",
+                "ec2:DisassociateRouteTable",
+                "ec2:ModifySubnetAttribute",
+                "ec2:AllocateAddress",
+                "ec2:ReleaseAddress",
+                "ec2:DescribeAddresses",
+                "ec2:DescribeAddressesAttribute",
+                "ec2:AssociateAddress",
+                "ec2:DisassociateAddress",
+                "ec2:CreateFlowLogs",
+                "ec2:DeleteFlowLogs",
+                "ec2:DescribeFlowLogs",
+                "ec2:CreateTags",
+                "ec2:DeleteTags",
+                "ec2:DescribePrefixLists",
+                "ec2:CreateVpcEndpoint",
+                "ec2:DeleteVpcEndpoints",
+                "ec2:DescribeVpcEndpoints",
+                "ec2:ModifyVpcEndpoint"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestedRegion": "us-east-2"
+                }
+            }
+        },
+        {
+            "Sid": "EKSManagement",
+            "Effect": "Allow",
+            "Action": [
+                "eks:ListClusters",
+                "eks:*Cluster",
+                "eks:*Nodegroup",
+                "eks:*Resource"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestedRegion": "us-east-2"
+                }
+            }
+        },
+        {
+            "Sid": "EKSRoleManagement",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateRole",
+                "iam:PassRole"
+            ],
+            "Resource": "arn:aws:iam::482619384845:role/staging-vanillatstodo-cluster-*",
+            "Condition": {
+                "StringEquals": {
+                    "iam:PermissionsBoundary": "arn:aws:iam::482619384845:policy/EKSClusterBoundary"
+                }
+            }
+        },
+        {
+            "Sid": "IAMRoleManagement",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:GetRole",
+                "iam:TagRole",
+                "iam:UntagRole",
+                "iam:PassRole",
+                "iam:UpdateRole",
+                "iam:UpdateRoleDescription",
+                "iam:PutRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:GetRolePolicy",
+                "iam:ListRolePolicies",
+                "iam:ListAttachedRolePolicies",
+                "iam:ListInstanceProfilesForRole",
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy"
+            ],
+            "Resource": [
+                "arn:aws:iam::482619384845:role/staging-vanillatstodo-*",
+                "arn:aws:iam::482619384845:role/eks_*",
+                "arn:aws:iam::482619384845:role/*"
+            ]
+        },
+        {
+            "Sid": "IAMPassRole",
+            "Effect": "Allow",
+            "Action": "iam:PassRole",
+            "Resource": [
+                "arn:aws:iam::482619384845:role/staging-vanillatstodo-*",
+                "arn:aws:iam::482619384845:role/eks-*"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PassedToService": [
+                        "eks.amazonaws.com",
+                        "ec2.amazonaws.com"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "CloudWatchManagement",
+            "Effect": "Allow",
+            "Action": [
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:DeleteAlarms",
+                "cloudwatch:DescribeAlarms",
+                "cloudwatch:GetMetricStatistics",
+                "cloudwatch:ListMetrics",
+                "cloudwatch:PutDashboard",
+                "cloudwatch:DeleteDashboards",
+                "cloudwatch:GetDashboard",
+                "cloudwatch:ListDashboards",
+                "cloudwatch:ListTagsForResource",
+                "cloudwatch:TagResource",
+                "cloudwatch:UntagResource",
+                "logs:CreateLogGroup",
+                "logs:DeleteLogGroup",
+                "logs:PutRetentionPolicy",
+                "logs:DescribeLogGroups",
+                "logs:ListTagsForResource",
+                "logs:TagResource",
+                "logs:UntagResource",
+                "logs:CreateLogStream",
+                "logs:DeleteLogStream",
+                "logs:PutLogEvents",
+                "logs:GetLogEvents"
+            ],
+            "Resource": [
+                "arn:aws:logs:us-east-2:482619384845:log-group:/aws/vpc/*",
+                "arn:aws:logs:us-east-2:482619384845:log-group:/aws/vpc/*:*",
+                "arn:aws:logs:us-east-2:482619384845:log-group:/aws/vpc/staging-flow-logs:*",
+                "*"
+            ]
+        },
+        {
+            "Sid": "CloudWatchTagManagement",
+            "Effect": "Allow",
+            "Action": [
+                "cloudwatch:ListTagsForResource",
+                "cloudwatch:TagResource",
+                "cloudwatch:UntagResource"
+            ],
+            "Resource": [
+                "arn:aws:cloudwatch:us-east-2:482619384845:alarm:*",
+                "arn:aws:cloudwatch:us-east-2:482619384845:dashboard/*"
+            ]
+        },
+        {
+            "Sid": "CloudWatchAlarmManagement",
+            "Effect": "Allow",
+            "Action": [
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:DeleteAlarms",
+                "cloudwatch:DescribeAlarms",
+                "cloudwatch:GetMetricStatistics",
+                "cloudwatch:ListMetrics"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "LogsManagement",
+            "Effect": "Allow",
+            "Action": [
+                "logs:*LogGroup*"
+            ],
+            "Resource": [
+                "arn:aws:logs:us-east-2:*:log-group:/aws/eks/*",
+                "arn:aws:logs:us-east-2:*:log-group:/aws/eks/*:*"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestedRegion": "us-east-2"
+                }
+            }
+        }
+    ]
+}

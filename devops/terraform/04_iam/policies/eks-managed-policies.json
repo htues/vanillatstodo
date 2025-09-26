@@ -1,0 +1,29 @@
+{
+  "policies": [
+    {
+      "name": "AmazonEKSClusterPolicy",
+      "arn": "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+      "description": "Provides permissions for EKS cluster management"
+    },
+    {
+      "name": "AmazonEKSWorkerNodePolicy", 
+      "arn": "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+      "description": "Provides permissions for EKS worker node management"
+    },
+    {
+      "name": "AmazonEKS_CNI_Policy",
+      "arn": "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy", 
+      "description": "Provides permissions for EKS CNI (Container Network Interface) management"
+    },
+    {
+      "name": "AmazonEC2ContainerRegistryReadOnly",
+      "arn": "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+      "description": "Provides read-only access to Amazon ECR repositories"
+    },
+    {
+      "name": "AmazonEKSVPCResourceController",
+      "arn": "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController",
+      "description": "Provides permissions for EKS VPC resource management"
+    }
+  ]
+}
