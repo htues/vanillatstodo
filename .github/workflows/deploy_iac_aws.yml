@@ -48,6 +48,17 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
+    - name: Debug OIDC token claims
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const token = await core.getIDToken('sts.amazonaws.com');
+          const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+          core.info(`aud=${payload.aud}`);
+          core.info(`sub=${payload.sub}`);
+          core.info(`iss=${payload.iss}`);
+          core.info(`Full payload: ${JSON.stringify(payload, null, 2)}`);
+
     - name: Configure AWS credentials (OIDC)
       uses: aws-actions/configure-aws-credentials@v4
       with:
