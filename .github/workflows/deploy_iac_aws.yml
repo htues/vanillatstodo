@@ -169,32 +169,26 @@ jobs:
         # Install Helm
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-        # Update kubeconfig
+        # Update kubeconfig using the EKS cluster's service role
+        echo "🔧 Configuring kubectl for EKS access..."
+        
+        # Get the EKS cluster's service role
+        CLUSTER_ROLE_ARN=$(aws eks describe-cluster \
+          --name ${{ env.CLUSTER_NAME }} \
+          --query "cluster.roleArn" \
+          --output text)
+        
+        echo "Using EKS cluster role: $CLUSTER_ROLE_ARN"
+        
+        # Update kubeconfig with the cluster's service role
         aws eks update-kubeconfig \
           --name ${{ env.CLUSTER_NAME }} \
-          --region ${{ env.AWS_REGION }}
+          --region ${{ env.AWS_REGION }} \
+          --role-arn $CLUSTER_ROLE_ARN
 
         # Wait for cluster to be ready
         echo "⏳ Waiting for EKS cluster to be ready..."
         aws eks wait cluster-active --name ${{ env.CLUSTER_NAME }}
-
-        # Add OIDC role to EKS aws-auth ConfigMap for Kubernetes API access
-        echo "🔧 Adding OIDC role to EKS aws-auth ConfigMap..."
-        ROLE_ARN="${{ secrets.AWS_ROLE_ARN }}"
-        
-        # Get current aws-auth ConfigMap
-        kubectl get configmap aws-auth -n kube-system -o yaml > aws-auth.yaml
-        
-        # Add the OIDC role to the mapRoles section
-        cat >> aws-auth.yaml <<EOF
-  - rolearn: $ROLE_ARN
-    username: github-actions
-    groups:
-      - system:masters
-EOF
-        
-        # Apply the updated ConfigMap
-        kubectl apply -f aws-auth.yaml
 
         # Wait for node groups to be ready
         echo "⏳ Waiting for node groups to be ready..."
