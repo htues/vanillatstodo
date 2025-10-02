@@ -169,31 +169,21 @@ jobs:
         # Install Helm
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-        # Update kubeconfig using the EKS cluster's service role
+        # Update kubeconfig without role assumption
         echo "🔧 Configuring kubectl for EKS access..."
         
-        # Get the EKS cluster's service role
+        # Get the EKS cluster's service role for debugging
         CLUSTER_ROLE_ARN=$(aws eks describe-cluster \
           --name ${{ env.CLUSTER_NAME }} \
           --query "cluster.roleArn" \
           --output text)
         
-        echo "Using EKS cluster role: $CLUSTER_ROLE_ARN"
-        echo "Expected role pattern: arn:aws:iam::482619384845:role/*-vanillatstodo-cluster-role"
+        echo "EKS cluster role: $CLUSTER_ROLE_ARN"
         
-        # Check if the role ARN matches our expected pattern
-        if [[ "$CLUSTER_ROLE_ARN" == *"vanillatstodo-cluster-role"* ]]; then
-          echo "✅ Cluster role matches expected pattern"
-        else
-          echo "❌ Cluster role does not match expected pattern!"
-          echo "Please update the AssumeEKSClusterRole policy to include: $CLUSTER_ROLE_ARN"
-        fi
-        
-        # Update kubeconfig with the cluster's service role
+        # Update kubeconfig without specifying a role (use current credentials)
         aws eks update-kubeconfig \
           --name ${{ env.CLUSTER_NAME }} \
-          --region ${{ env.AWS_REGION }} \
-          --role-arn $CLUSTER_ROLE_ARN
+          --region ${{ env.AWS_REGION }}
 
         # Wait for cluster to be ready
         echo "⏳ Waiting for EKS cluster to be ready..."
