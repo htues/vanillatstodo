@@ -259,21 +259,11 @@ jobs:
 
         echo "✅ EBS CSI Driver installed successfully!"
 
-    - name: Deploy IAM Resources (GitHub Actions OIDC)
+    - name: Skip IAM Resources (Using Manual OIDC Role)
       id: iam
       run: |
-        cd devops/terraform/04_iam
-        terraform init -reconfigure \
-          -backend-config="bucket=${{ env.BUCKET_NAME }}" \
-          -backend-config="key=${{ env.ENVIRONMENT }}/iam/terraform.tfstate" \
-          -backend-config="region=${{ env.AWS_REGION }}" \
-          -backend-config="encrypt=true"
-        terraform apply -auto-approve \
-          -var="aws_region=${{ env.AWS_REGION }}" \
-          -var="project_name=${{ env.PROJECT_NAME }}" \
-          -var="environment=${{ env.ENVIRONMENT }}" \
-          -var="github_owner=hftamayo" \
-          -var="github_repo=vanillatstodo"
+        echo "ℹ️ Skipping IAM deployment - using manually created OIDC role"
+        echo "Role ARN: ${{ secrets.AWS_ROLE_ARN }}"
 
     - name: Deploy Monitoring Resources
       id: monitoring
@@ -414,29 +404,12 @@ jobs:
           --output text)
         echo "cluster_endpoint=${ENDPOINT}" >> $GITHUB_OUTPUT
 
-    - name: Export IAM Role ARN
+    - name: Export Manual IAM Role ARN
       id: iam_output
       if: success()
       run: |
-        cd devops/terraform/04_iam
-        ROLE_ARN=$(terraform output -raw github_actions_role_arn)
-        echo "github_actions_role_arn=${ROLE_ARN}" >> $GITHUB_OUTPUT
-        echo "✅ GitHub Actions Role ARN: ${ROLE_ARN}"
-
-    - name: Switch to OIDC Authentication
-      if: success()
-      run: |
-        echo "🔄 Switching from access keys to OIDC authentication..."
-        echo "Role ARN: ${{ steps.iam_output.outputs.github_actions_role_arn }}"
-
-    - name: Configure AWS credentials (OIDC)
-      if: success()
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ steps.iam_output.outputs.github_actions_role_arn }}
-        role-session-name: GitHubActions-Post-IaC
-        aws-region: ${{ env.AWS_REGION }}
-        audience: sts.amazonaws.com
+        echo "github_actions_role_arn=${{ secrets.AWS_ROLE_ARN }}" >> $GITHUB_OUTPUT
+        echo "✅ Using Manual GitHub Actions Role ARN: ${{ secrets.AWS_ROLE_ARN }}"
 
     - name: Generate Resource Summary
       id: resource_summary
