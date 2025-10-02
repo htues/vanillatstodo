@@ -169,10 +169,11 @@ jobs:
         # Install Helm
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-        # Update kubeconfig
+        # Update kubeconfig with OIDC role
         aws eks update-kubeconfig \
           --name ${{ env.CLUSTER_NAME }} \
-          --region ${{ env.AWS_REGION }}
+          --region ${{ env.AWS_REGION }} \
+          --role-arn ${{ secrets.AWS_ROLE_ARN }}
 
         # Wait for cluster to be ready
         echo "⏳ Waiting for EKS cluster to be ready..."
@@ -189,7 +190,7 @@ jobs:
 
         # Create the ebs-csi-driver service account
         echo "🔧 Creating EBS CSI Driver service account..."
-        kubectl apply -f - <<EOF
+        kubectl apply -f - --validate=false <<EOF
         apiVersion: v1
         kind: ServiceAccount
         metadata:
