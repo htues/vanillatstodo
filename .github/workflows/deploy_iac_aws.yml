@@ -179,6 +179,15 @@ jobs:
           --output text)
         
         echo "Using EKS cluster role: $CLUSTER_ROLE_ARN"
+        echo "Expected role pattern: arn:aws:iam::482619384845:role/*-vanillatstodo-cluster-role"
+        
+        # Check if the role ARN matches our expected pattern
+        if [[ "$CLUSTER_ROLE_ARN" == *"vanillatstodo-cluster-role"* ]]; then
+          echo "✅ Cluster role matches expected pattern"
+        else
+          echo "❌ Cluster role does not match expected pattern!"
+          echo "Please update the AssumeEKSClusterRole policy to include: $CLUSTER_ROLE_ARN"
+        fi
         
         # Update kubeconfig with the cluster's service role
         aws eks update-kubeconfig \
