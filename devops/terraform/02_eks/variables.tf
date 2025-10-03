@@ -83,3 +83,14 @@ locals {
   # Compute cluster role name if not explicitly provided
   computed_cluster_role_name = var.cluster_role_name != null ? var.cluster_role_name : "${local.effective_environment}-${var.project_name}-cluster-role"
 }
+
+variable "gha_actions_role_arn" {
+  description = "Optional: GitHub Actions IAM Role ARN to grant EKS admin access via Access Entries"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.gha_actions_role_arn == null || can(regex("^arn:aws:iam::\\d{12}:role\/.+$", var.gha_actions_role_arn))
+    error_message = "If provided, gha_actions_role_arn must be a valid IAM role ARN."
+  }
+}

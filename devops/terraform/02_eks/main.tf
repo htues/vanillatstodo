@@ -97,3 +97,25 @@ resource "aws_eks_node_group" "workers" {
     Name = "${var.environment}-${var.project_name}-workers"
   })
 }
+
+# Optional: Grant GitHub Actions role cluster-admin via EKS Access Entries (preferred over aws-auth alone)
+resource "aws_eks_access_entry" "gha_pipeline" {
+  count  = var.gha_actions_role_arn == null ? 0 : 1
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = var.gha_actions_role_arn
+  type          = "STANDARD"
+
+  tags = merge(local.common_tags, { Name = "gha-access-entry" })
+}
+
+resource "aws_eks_access_policy_association" "gha_admin" {
+  count         = var.gha_actions_role_arn == null ? 0 : 1
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = var.gha_actions_role_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.gha_pipeline]
+}

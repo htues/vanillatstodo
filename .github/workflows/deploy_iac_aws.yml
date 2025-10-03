@@ -154,7 +154,8 @@ jobs:
           -var="aws_region=${{ env.AWS_REGION }}" \
           -var="project_name=${{ env.PROJECT_NAME }}" \
           -var="environment=${{ env.ENVIRONMENT }}" \
-          -var="cluster_role_name=${{ env.EKS_CLUSTER_ROLE }}"
+          -var="cluster_role_name=${{ env.EKS_CLUSTER_ROLE }}" \
+          -var="gha_actions_role_arn=${{ secrets.AWS_ROLE_ARN }}"
 
     - name: Install EBS CSI Driver
       id: ebs_csi
