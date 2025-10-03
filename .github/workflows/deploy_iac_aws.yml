@@ -224,17 +224,9 @@ jobs:
 
         # Create the ebs-csi-driver service account (retry with a quick reconfigure if needed)
         echo "🔧 Creating EBS CSI Driver service account..."
-        cat > ebs-csi-sa.yaml <<'EOF'
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: ebs-csi-controller-sa
-  namespace: kube-system
-  labels:
-    app.kubernetes.io/name: aws-ebs-csi-driver
-EOF
         set +e
-        kubectl apply -f ebs-csi-sa.yaml --validate=false
+        kubectl get serviceaccount ebs-csi-controller-sa -n kube-system >/dev/null 2>&1 || \
+          kubectl create serviceaccount ebs-csi-controller-sa -n kube-system
         APPLY_STATUS=$?
         if [ $APPLY_STATUS -ne 0 ]; then
           echo "⚠️ Initial kubectl apply failed. Printing diagnostic info and retrying once..."
@@ -245,7 +237,8 @@ EOF
             --name ${{ env.CLUSTER_NAME }} \
             --region ${{ env.AWS_REGION }}
           echo "🔎 Retrying kubectl apply..."
-          kubectl apply -f ebs-csi-sa.yaml --validate=false
+          kubectl get serviceaccount ebs-csi-controller-sa -n kube-system >/dev/null 2>&1 || \
+            kubectl create serviceaccount ebs-csi-controller-sa -n kube-system
           APPLY_STATUS=$?
         fi
         set -e
@@ -258,27 +251,37 @@ EOF
         echo "🔧 Creating EBS CSI Driver IAM role..."
         EBS_CSI_ROLE_NAME="${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-ebs-csi-role"
 
-        # Create trust policy for EBS CSI Driver
-        cat > ebs-csi-trust-policy.json <<EOF
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Effect": "Allow",
-              "Principal": {
-                "Federated": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:oidc-provider/oidc.eks.${{ env.AWS_REGION }}.amazonaws.com/id/$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.identity.oidc.issuer" --output text | cut -d'/' -f5)"
-              },
-              "Action": "sts:AssumeRoleWithWebIdentity",
-              "Condition": {
-                "StringEquals": {
-                  "oidc.eks.${{ env.AWS_REGION }}.amazonaws.com/id/$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.identity.oidc.issuer" --output text | cut -d'/' -f5):sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa",
-                  "oidc.eks.${{ env.AWS_REGION }}.amazonaws.com/id/$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.identity.oidc.issuer" --output text | cut -d'/' -f5):aud": "sts.amazonaws.com"
+        # Create trust policy for EBS CSI Driver using jq to avoid heredoc indentation issues
+        ISSUER_ID=$(aws eks describe-cluster \
+          --name ${{ env.CLUSTER_NAME }} \
+          --query "cluster.identity.oidc.issuer" \
+          --output text | cut -d'/' -f5)
+        jq -n \
+          --arg acct "${{ secrets.AWS_ACCOUNT_ID }}" \
+          --arg region "${{ env.AWS_REGION }}" \
+          --arg issuer "$ISSUER_ID" \
+          '{
+            Version: "2012-10-17",
+            Statement: [
+              {
+                Effect: "Allow",
+                Principal: {
+                  Federated: ("arn:aws:iam::" + $acct + ":oidc-provider/oidc.eks." + $region + ".amazonaws.com/id/" + $issuer)
+                },
+                Action: "sts:AssumeRoleWithWebIdentity",
+                Condition: {
+                  StringEquals: {
+                    (
+                      "oidc.eks." + $region + ".amazonaws.com/id/" + $issuer + ":sub"
+                    ): "system:serviceaccount:kube-system:ebs-csi-controller-sa",
+                    (
+                      "oidc.eks." + $region + ".amazonaws.com/id/" + $issuer + ":aud"
+                    ): "sts.amazonaws.com"
+                  }
                 }
               }
-            }
-          ]
-        }
-        EOF
+            ]
+          }' > ebs-csi-trust-policy.json
 
         # Create the IAM role
         aws iam create-role \
