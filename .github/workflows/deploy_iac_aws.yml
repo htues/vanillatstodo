@@ -415,12 +415,6 @@ jobs:
           --output text)
         echo "cluster_endpoint=${ENDPOINT}" >> $GITHUB_OUTPUT
 
-    - name: Export Manual IAM Role ARN
-      id: iam_output
-      if: success()
-      run: |
-        echo "github_actions_role_arn=${{ secrets.AWS_ROLE_ARN }}" >> $GITHUB_OUTPUT
-        echo "✅ Using Manual GitHub Actions Role ARN: ${{ secrets.AWS_ROLE_ARN }}"
 
     - name: Generate Resource Summary
       id: resource_summary
