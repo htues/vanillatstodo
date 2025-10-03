@@ -90,7 +90,7 @@ variable "gha_actions_role_arn" {
   default     = null
 
   validation {
-    condition     = var.gha_actions_role_arn == null || can(regex("^arn:aws:iam::\\d{12}:role\/.+$", var.gha_actions_role_arn))
+    condition     = var.gha_actions_role_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:role/.+$", var.gha_actions_role_arn))
     error_message = "If provided, gha_actions_role_arn must be a valid IAM role ARN."
   }
 }

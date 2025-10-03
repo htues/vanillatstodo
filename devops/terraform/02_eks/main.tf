@@ -100,7 +100,7 @@ resource "aws_eks_node_group" "workers" {
 
 # Optional: Grant GitHub Actions role cluster-admin via EKS Access Entries (preferred over aws-auth alone)
 resource "aws_eks_access_entry" "gha_pipeline" {
-  count  = var.gha_actions_role_arn == null ? 0 : 1
+  count         = var.gha_actions_role_arn == null ? 0 : 1
   cluster_name  = aws_eks_cluster.main.name
   principal_arn = var.gha_actions_role_arn
   type          = "STANDARD"

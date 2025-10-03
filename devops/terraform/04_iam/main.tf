@@ -54,7 +54,7 @@ resource "aws_iam_role_policy_attachment" "github_actions_eks_policies" {
   for_each = {
     for policy in local.eks_policies.policies : policy.name => policy
   }
-  
+
   role       = aws_iam_role.github_actions_deployer.name
   policy_arn = each.value.arn
 }
