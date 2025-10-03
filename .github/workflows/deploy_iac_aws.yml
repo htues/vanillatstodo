@@ -169,21 +169,30 @@ jobs:
         # Install Helm
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-        # Update kubeconfig without role assumption
+        # Update kubeconfig and force using the pipeline's IAM role
         echo "🔧 Configuring kubectl for EKS access..."
-        
+
         # Get the EKS cluster's service role for debugging
         CLUSTER_ROLE_ARN=$(aws eks describe-cluster \
           --name ${{ env.CLUSTER_NAME }} \
           --query "cluster.roleArn" \
           --output text)
-        
+
         echo "EKS cluster role: $CLUSTER_ROLE_ARN"
-        
-        # Update kubeconfig without specifying a role (use current credentials)
+
+        # Update kubeconfig using the same role the workflow assumed
         aws eks update-kubeconfig \
           --name ${{ env.CLUSTER_NAME }} \
-          --region ${{ env.AWS_REGION }}
+          --region ${{ env.AWS_REGION }} \
+          --role-arn "${{ secrets.AWS_ROLE_ARN }}"
+
+        # Quick diagnostics for auth/context
+        echo "🔎 AWS identity:" && aws sts get-caller-identity || true
+        echo "🔎 kubectl version (client):" && kubectl version --client=true --output=yaml || true
+        echo "🔎 Current kube context:" && kubectl config current-context || true
+        echo "🔎 kubeconfig users:" && kubectl config view -o jsonpath='{.users[*].name}' || true
+        echo "" # newline
+        echo "🔎 Attempting to fetch token..." && aws eks get-token --cluster-name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }} >/dev/null && echo "Token OK" || echo "Token fetch failed"
 
         # Wait for cluster to be ready
         echo "⏳ Waiting for EKS cluster to be ready..."
@@ -198,8 +207,9 @@ jobs:
         helm repo add eks https://aws.github.io/eks-charts
         helm repo update
 
-        # Create the ebs-csi-driver service account
+        # Create the ebs-csi-driver service account (retry with a quick reconfigure if needed)
         echo "🔧 Creating EBS CSI Driver service account..."
+        set +e
         kubectl apply -f - --validate=false <<EOF
         apiVersion: v1
         kind: ServiceAccount
@@ -209,6 +219,33 @@ jobs:
           labels:
             app.kubernetes.io/name: aws-ebs-csi-driver
         EOF
+        APPLY_STATUS=$?
+        if [ $APPLY_STATUS -ne 0 ]; then
+          echo "⚠️ Initial kubectl apply failed. Printing diagnostic info and retrying once..."
+          echo "🔎 kubectl cluster-info:" && kubectl cluster-info || true
+          echo "🔎 kubeconfig (redacted):" && kubectl config view --minify || true
+          echo "🔎 Re-running update-kubeconfig with role..."
+          aws eks update-kubeconfig \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --role-arn "${{ secrets.AWS_ROLE_ARN }}"
+          echo "🔎 Retrying kubectl apply..."
+          kubectl apply -f - --validate=false <<EOF
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: ebs-csi-controller-sa
+            namespace: kube-system
+            labels:
+              app.kubernetes.io/name: aws-ebs-csi-driver
+          EOF
+          APPLY_STATUS=$?
+        fi
+        set -e
+        if [ $APPLY_STATUS -ne 0 ]; then
+          echo "❌ Failed to create service account after retry. Exiting."
+          exit $APPLY_STATUS
+        fi
 
         # Create the EBS CSI Driver IAM role
         echo "🔧 Creating EBS CSI Driver IAM role..."
