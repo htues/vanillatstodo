@@ -181,11 +181,10 @@ jobs:
 
         echo "EKS cluster role: $CLUSTER_ROLE_ARN"
 
-        # Update kubeconfig using the same role the workflow assumed
+        # Update kubeconfig using current credentials (already assumed via OIDC action)
         aws eks update-kubeconfig \
           --name ${{ env.CLUSTER_NAME }} \
-          --region ${{ env.AWS_REGION }} \
-          --role-arn "${{ secrets.AWS_ROLE_ARN }}"
+          --region ${{ env.AWS_REGION }}
 
         # Quick diagnostics for auth/context
         echo "🔎 AWS identity:" && aws sts get-caller-identity || true
@@ -208,38 +207,45 @@ jobs:
         helm repo add eks https://aws.github.io/eks-charts
         helm repo update
 
+        # Wait briefly for EKS access entry/credentials to propagate
+        echo "⏳ Waiting for EKS access propagation..."
+        for i in {1..12}; do
+          if kubectl auth can-i get namespaces >/dev/null 2>&1; then
+            echo "✅ EKS access verified."
+            break
+          else
+            echo "...still waiting for RBAC/credential propagation ($i/12)" && sleep 10
+          fi
+        done
+        if ! kubectl auth can-i get namespaces >/dev/null 2>&1; then
+          echo "❌ EKS access not yet propagated after waiting. Aborting."
+          exit 1
+        fi
+
         # Create the ebs-csi-driver service account (retry with a quick reconfigure if needed)
         echo "🔧 Creating EBS CSI Driver service account..."
+        cat > ebs-csi-sa.yaml <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ebs-csi-controller-sa
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: aws-ebs-csi-driver
+EOF
         set +e
-        kubectl apply -f - --validate=false <<EOF
-        apiVersion: v1
-        kind: ServiceAccount
-        metadata:
-          name: ebs-csi-controller-sa
-          namespace: kube-system
-          labels:
-            app.kubernetes.io/name: aws-ebs-csi-driver
-        EOF
+        kubectl apply -f ebs-csi-sa.yaml --validate=false
         APPLY_STATUS=$?
         if [ $APPLY_STATUS -ne 0 ]; then
           echo "⚠️ Initial kubectl apply failed. Printing diagnostic info and retrying once..."
           echo "🔎 kubectl cluster-info:" && kubectl cluster-info || true
           echo "🔎 kubeconfig (redacted):" && kubectl config view --minify || true
-          echo "🔎 Re-running update-kubeconfig with role..."
+          echo "🔎 Re-running update-kubeconfig..."
           aws eks update-kubeconfig \
             --name ${{ env.CLUSTER_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --role-arn "${{ secrets.AWS_ROLE_ARN }}"
+            --region ${{ env.AWS_REGION }}
           echo "🔎 Retrying kubectl apply..."
-          kubectl apply -f - --validate=false <<EOF
-          apiVersion: v1
-          kind: ServiceAccount
-          metadata:
-            name: ebs-csi-controller-sa
-            namespace: kube-system
-            labels:
-              app.kubernetes.io/name: aws-ebs-csi-driver
-          EOF
+          kubectl apply -f ebs-csi-sa.yaml --validate=false
           APPLY_STATUS=$?
         fi
         set -e
