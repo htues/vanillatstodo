@@ -141,11 +141,6 @@ resource "aws_iam_openid_connect_provider" "eks" {
   tags = merge(local.common_tags, { Name = "eks-oidc" })
 }
 
-# IAM role for EBS CSI add-on (IRSA)
-data "aws_iam_policy" "ebs_csi" {
-  arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-}
-
 data "aws_caller_identity" "current" {}
 
 resource "aws_iam_role" "ebs_csi" {
@@ -175,7 +170,7 @@ resource "aws_iam_role" "ebs_csi" {
 
 resource "aws_iam_role_policy_attachment" "ebs_csi" {
   role       = aws_iam_role.ebs_csi.name
-  policy_arn = data.aws_iam_policy.ebs_csi.arn
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
 }
 
 # Manage EBS CSI as an EKS add-on
