@@ -222,30 +222,7 @@ jobs:
           exit 1
         fi
 
-        # Create the ebs-csi-driver service account (retry with a quick reconfigure if needed)
-        echo "🔧 Creating EBS CSI Driver service account..."
-        set +e
-        kubectl get serviceaccount ebs-csi-controller-sa -n kube-system >/dev/null 2>&1 || \
-          kubectl create serviceaccount ebs-csi-controller-sa -n kube-system
-        APPLY_STATUS=$?
-        if [ $APPLY_STATUS -ne 0 ]; then
-          echo "⚠️ Initial kubectl apply failed. Printing diagnostic info and retrying once..."
-          echo "🔎 kubectl cluster-info:" && kubectl cluster-info || true
-          echo "🔎 kubeconfig (redacted):" && kubectl config view --minify || true
-          echo "🔎 Re-running update-kubeconfig..."
-          aws eks update-kubeconfig \
-            --name ${{ env.CLUSTER_NAME }} \
-            --region ${{ env.AWS_REGION }}
-          echo "🔎 Retrying kubectl apply..."
-          kubectl get serviceaccount ebs-csi-controller-sa -n kube-system >/dev/null 2>&1 || \
-            kubectl create serviceaccount ebs-csi-controller-sa -n kube-system
-          APPLY_STATUS=$?
-        fi
-        set -e
-        if [ $APPLY_STATUS -ne 0 ]; then
-          echo "❌ Failed to create service account after retry. Exiting."
-          exit $APPLY_STATUS
-        fi
+        # Do not create the service account manually; the EKS add-on will manage it
 
         # Create the EBS CSI Driver IAM role
         echo "🔧 Creating EBS CSI Driver IAM role..."
@@ -296,11 +273,7 @@ jobs:
         # Get the role ARN
         EBS_CSI_ROLE_ARN=$(aws iam get-role --role-name $EBS_CSI_ROLE_NAME --query "Role.Arn" --output text)
         echo "EBS_CSI_ROLE_ARN=$EBS_CSI_ROLE_ARN" >> $GITHUB_ENV
-
-        # Annotate the service account with the role ARN
-        kubectl annotate serviceaccount ebs-csi-controller-sa \
-          -n kube-system \
-          eks.amazonaws.com/role-arn=$EBS_CSI_ROLE_ARN
+        echo "🔎 Using IRSA role for add-on: $EBS_CSI_ROLE_ARN"
 
         # Prefer EKS managed add-on for EBS CSI Driver
         echo "📦 Installing EBS CSI Driver via EKS managed add-on..."
@@ -359,6 +332,10 @@ jobs:
             --query 'addon.health' \
             --output json \
             --region ${{ env.AWS_REGION }} || true
+          echo "🔎 Recent add-on events:" || true
+          kubectl get events -n kube-system --sort-by=.lastTimestamp | tail -n 50 || true
+          echo "🔎 DaemonSets in kube-system:" && kubectl get ds -n kube-system -o wide || true
+          echo "🔎 Pods for ebs-csi-controller:" && kubectl get pods -n kube-system -l app=ebs-csi-controller -o wide || true
           exit 1
         fi
 
