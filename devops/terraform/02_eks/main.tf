@@ -145,6 +145,11 @@ data "aws_caller_identity" "current" {}
 
 resource "aws_iam_role" "ebs_csi" {
   name = "${var.environment}-${var.project_name}-ebs-csi-role"
+  # Allow adopting a pre-existing role if it exists
+  lifecycle {
+    create_before_destroy = true
+    ignore_changes        = [assume_role_policy, tags]
+  }
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
