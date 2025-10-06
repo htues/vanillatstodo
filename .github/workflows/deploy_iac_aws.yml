@@ -157,10 +157,6 @@ jobs:
           -var="cluster_role_name=${{ env.EKS_CLUSTER_ROLE }}" \
           -var="gha_actions_role_arn=${{ secrets.AWS_ROLE_ARN }}"
 
-    # CSI Driver installation is now fully managed by Terraform aws_eks_addon
-
-        echo "✅ EBS CSI Driver installed successfully!"
-
     - name: Skip IAM Resources (Using Manual OIDC Role)
       id: iam
       run: |
