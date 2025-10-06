@@ -329,9 +329,9 @@ jobs:
             --service-account-role-arn "$EBS_CSI_ROLE_ARN"
         fi
 
-        # Wait for add-on to become ACTIVE
+        # Wait for add-on to become ACTIVE (extend to ~5 minutes)
         echo "⏳ Waiting for EBS CSI Driver add-on to become ACTIVE..."
-        for i in {1..18}; do
+        for i in {1..30}; do
           STATUS=$(aws eks describe-addon \
             --cluster-name ${{ env.CLUSTER_NAME }} \
             --addon-name aws-ebs-csi-driver \
@@ -352,12 +352,13 @@ jobs:
           --region ${{ env.AWS_REGION }} 2>/dev/null || echo "UNKNOWN")
         if [ "$FINAL_STATUS" != "ACTIVE" ]; then
           echo "⚠️ Add-on did not reach ACTIVE (status=$FINAL_STATUS). Falling back to Helm install..."
-          helm repo add eks https://aws.github.io/eks-charts || true
+          # Use the official aws-ebs-csi-driver chart repository
+          helm repo add aws-ebs-csi-driver https://kubernetes-sigs.github.io/aws-ebs-csi-driver || true
           helm repo update || true
-          echo "🔎 Available eks charts:"
-          helm search repo eks | sed -n '1,120p' || true
+          echo "🔎 Available aws-ebs-csi-driver charts:"
+          helm search repo aws-ebs-csi-driver | sed -n '1,120p' || true
           echo "📦 Installing EBS CSI Driver with Helm fallback..."
-          helm upgrade --install aws-ebs-csi-driver eks/aws-ebs-csi-driver \
+          helm upgrade --install aws-ebs-csi-driver aws-ebs-csi-driver/aws-ebs-csi-driver \
             --namespace kube-system \
             --create-namespace \
             --set controller.serviceAccount.create=false \
