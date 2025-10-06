@@ -119,3 +119,73 @@ resource "aws_eks_access_policy_association" "gha_admin" {
 
   depends_on = [aws_eks_access_entry.gha_pipeline]
 }
+
+# Ensure IAM OIDC provider for the cluster exists (for IRSA)
+data "aws_eks_cluster" "this" {
+  name = aws_eks_cluster.main.name
+}
+
+data "aws_eks_cluster_auth" "this" {
+  name = aws_eks_cluster.main.name
+}
+
+data "tls_certificate" "oidc" {
+  url = data.aws_eks_cluster.this.identity[0].oidc[0].issuer
+}
+
+resource "aws_iam_openid_connect_provider" "eks" {
+  url             = data.aws_eks_cluster.this.identity[0].oidc[0].issuer
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [data.tls_certificate.oidc.certificates[0].sha1_fingerprint]
+
+  tags = merge(local.common_tags, { Name = "eks-oidc" })
+}
+
+# IAM role for EBS CSI add-on (IRSA)
+data "aws_iam_policy" "ebs_csi" {
+  arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_iam_role" "ebs_csi" {
+  name = "${var.environment}-${var.project_name}-ebs-csi-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.eks.arn
+        },
+        Action = "sts:AssumeRoleWithWebIdentity",
+        Condition = {
+          StringEquals = {
+            "${replace(data.aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")}:aud" = "sts.amazonaws.com",
+            "${replace(data.aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, { Name = "ebs-csi-role" })
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  role       = aws_iam_role.ebs_csi.name
+  policy_arn = data.aws_iam_policy.ebs_csi.arn
+}
+
+# Manage EBS CSI as an EKS add-on
+resource "aws_eks_addon" "ebs_csi" {
+  cluster_name                = aws_eks_cluster.main.name
+  addon_name                  = "aws-ebs-csi-driver"
+  service_account_role_arn    = aws_iam_role.ebs_csi.arn
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = merge(local.common_tags, { Name = "aws-ebs-csi-driver" })
+
+  depends_on = [aws_iam_role_policy_attachment.ebs_csi]
+}
