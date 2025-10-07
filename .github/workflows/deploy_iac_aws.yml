@@ -152,9 +152,17 @@ jobs:
 
         # Import pre-existing IRSA role if it already exists to avoid EntityAlreadyExists
         EBS_CSI_ROLE_NAME="${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-ebs-csi-role"
-        if aws iam get-role --role-name "$EBS_CSI_ROLE_NAME" >/dev/null 2>&1; then
+        set +e
+        terraform state show aws_iam_role.ebs_csi >/dev/null 2>&1
+        IN_STATE=$?
+        set -e
+        if [ $IN_STATE -ne 0 ] && aws iam get-role --role-name "$EBS_CSI_ROLE_NAME" >/dev/null 2>&1; then
           echo "🔎 Importing existing IAM role into state: $EBS_CSI_ROLE_NAME"
-          terraform import -input=false aws_iam_role.ebs_csi "$EBS_CSI_ROLE_NAME" || true
+          set +e
+          terraform import -input=false aws_iam_role.ebs_csi "$EBS_CSI_ROLE_NAME"
+          set -e || true
+        else
+          echo "ℹ️ IRSA role already managed in state or not found; skipping import."
         fi
 
         # Import existing OIDC provider if the cluster already exists; otherwise Terraform will create it
@@ -164,7 +172,17 @@ jobs:
           OIDC_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:oidc-provider/${OIDC_HOST}"
           if aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_ARN" >/dev/null 2>&1; then
             echo "🔎 Importing existing OIDC provider into state: $OIDC_ARN"
-            terraform import -input=false aws_iam_openid_connect_provider.eks "$OIDC_ARN" || true
+            set +e
+            terraform state show aws_iam_openid_connect_provider.eks >/dev/null 2>&1
+            OIDC_IN_STATE=$?
+            set -e
+            if [ $OIDC_IN_STATE -ne 0 ]; then
+              set +e
+              terraform import -input=false aws_iam_openid_connect_provider.eks "$OIDC_ARN"
+              set -e || true
+            else
+              echo "ℹ️ OIDC provider already managed in state; skipping import."
+            fi
           fi
         else
           echo "ℹ️ Cluster not found yet; skipping OIDC provider import (Terraform will create it)."
