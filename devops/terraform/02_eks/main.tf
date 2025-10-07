@@ -180,6 +180,7 @@ resource "aws_iam_role_policy_attachment" "ebs_csi" {
 
 # Manage EBS CSI as an EKS add-on
 resource "aws_eks_addon" "ebs_csi" {
+  count                       = var.enable_ebs_csi_addon ? 1 : 0
   cluster_name                = aws_eks_cluster.main.name
   addon_name                  = "aws-ebs-csi-driver"
   service_account_role_arn    = aws_iam_role.ebs_csi.arn
@@ -187,5 +188,15 @@ resource "aws_eks_addon" "ebs_csi" {
 
   tags = merge(local.common_tags, { Name = "aws-ebs-csi-driver" })
 
-  depends_on = [aws_iam_role_policy_attachment.ebs_csi]
+  # Ensure nodes are ready before installing the daemonset-based add-on
+  depends_on = [
+    aws_iam_role_policy_attachment.ebs_csi,
+    aws_eks_node_group.workers,
+  ]
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "20m"
+  }
 }

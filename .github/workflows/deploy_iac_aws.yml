@@ -197,7 +197,60 @@ jobs:
           -var="project_name=${{ env.PROJECT_NAME }}" \
           -var="environment=${{ env.ENVIRONMENT }}" \
           -var="cluster_role_name=${{ env.EKS_CLUSTER_ROLE }}" \
-          -var="gha_actions_role_arn=${{ secrets.AWS_ROLE_ARN }}"
+          -var="gha_actions_role_arn=${{ secrets.AWS_ROLE_ARN }}" \
+          -var="enable_ebs_csi_addon=false"
+
+    - name: Install EBS CSI Driver Add-on (managed)
+      id: ebs_csi_addon
+      run: |
+        echo "🔧 Preparing to install EBS CSI Driver add-on..."
+        # kubectl + identity
+        aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+        echo "🔎 AWS identity:" && aws sts get-caller-identity || true
+        echo "🔎 Nodes:" && kubectl get nodes -o wide || true
+        echo "🔎 kube-system daemonsets:" && kubectl -n kube-system get ds -o wide || true
+
+        # Ensure nodes are Ready before installing
+        echo "⏳ Waiting for nodes to become Ready..."
+        for i in {1..30}; do
+          READY=$(kubectl get nodes --no-headers 2>/dev/null | awk '{print $2}' | grep -c "Ready")
+          if [ "$READY" -ge 1 ]; then
+            echo "✅ Nodes are Ready ($READY)"; break
+          fi
+          echo "...still waiting ($i/30)"; sleep 10
+        done
+
+        # Create or update add-on with short timeout
+        set +e
+        aws eks describe-addon --cluster-name ${{ env.CLUSTER_NAME }} --addon-name aws-ebs-csi-driver --region ${{ env.AWS_REGION }} >/dev/null 2>&1
+        EXISTS=$?
+        set -e
+        if [ $EXISTS -eq 0 ]; then
+          echo "🔄 Updating existing EBS CSI add-on..."
+          aws eks update-addon --cluster-name ${{ env.CLUSTER_NAME }} --addon-name aws-ebs-csi-driver --resolve-conflicts OVERWRITE --region ${{ env.AWS_REGION }} || true
+        else
+          echo "🆕 Creating EBS CSI add-on..."
+          aws eks create-addon --cluster-name ${{ env.CLUSTER_NAME }} --addon-name aws-ebs-csi-driver --resolve-conflicts OVERWRITE --region ${{ env.AWS_REGION }} || true
+        fi
+
+        echo "⏳ Waiting for add-on to be ACTIVE (10m max)..."
+        for i in {1..60}; do
+          STATUS=$(aws eks describe-addon --cluster-name ${{ env.CLUSTER_NAME }} --addon-name aws-ebs-csi-driver --query 'addon.status' --output text --region ${{ env.AWS_REGION }} 2>/dev/null || echo UNKNOWN)
+          echo "Add-on status: $STATUS"
+          if [ "$STATUS" = "ACTIVE" ]; then
+            break
+          fi
+          sleep 10
+        done
+        FINAL=$(aws eks describe-addon --cluster-name ${{ env.CLUSTER_NAME }} --addon-name aws-ebs-csi-driver --query 'addon.status' --output text --region ${{ env.AWS_REGION }} 2>/dev/null || echo UNKNOWN)
+        if [ "$FINAL" != "ACTIVE" ]; then
+          echo "❌ EBS CSI add-on not ACTIVE (status=$FINAL). Diagnostics:"
+          aws eks describe-addon --cluster-name ${{ env.CLUSTER_NAME }} --addon-name aws-ebs-csi-driver --query 'addon.health' --output json --region ${{ env.AWS_REGION }} || true
+          kubectl -n kube-system get ds,pods -o wide | grep -Ei 'ebs|csi' || true
+          kubectl -n kube-system get events --sort-by=.lastTimestamp | tail -n 100 || true
+          exit 1
+        fi
+        echo "✅ EBS CSI add-on ACTIVE"
 
     - name: Skip IAM Resources (Using Manual OIDC Role)
       id: iam

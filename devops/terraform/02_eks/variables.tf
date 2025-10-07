@@ -94,3 +94,9 @@ variable "gha_actions_role_arn" {
     error_message = "If provided, gha_actions_role_arn must be a valid IAM role ARN."
   }
 }
+
+variable "enable_ebs_csi_addon" {
+  description = "Whether to deploy the EBS CSI driver as an EKS managed add-on."
+  type        = bool
+  default     = false
+}
