@@ -12,10 +12,10 @@ name: Deploy TFIaC on AWS
         required: true
         type: choice
         options:
-          - staging
-          - production
-          - experimental
-        default: "staging"
+        - staging
+        - production
+        - experimental
+        default: "experimental"
 
 permissions:
   contents: read
@@ -28,6 +28,7 @@ env:
   TF_VERSION: "1.10.0"
   PROJECT_NAME: ${{ vars.APP_NAME || 'vanillatstodo' }}
   ENVIRONMENT: ${{ github.event.inputs.environment }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -44,395 +45,457 @@ jobs:
       cluster_name: ${{ env.CLUSTER_NAME }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+    - name: Debug OIDC token claims
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const token = await core.getIDToken('sts.amazonaws.com');
+          const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+          core.info(`aud=${payload.aud}`);
+          core.info(`sub=${payload.sub}`);
+          core.info(`iss=${payload.iss}`);
+          core.info(`Full payload: ${JSON.stringify(payload, null, 2)}`);
 
-      - name: Ensure S3 State Bucket Exists
-        run: |
-          chmod +x devops/scripts/infra-manager.sh
-          devops/scripts/infra-manager.sh verify
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      - name: Set Dynamic Variables
-        run: |
-          echo "Using GitHub repository variables:"
-          echo "CLUSTER_NAME=${{ env.CLUSTER_NAME }}"
-          echo "AWS_REGION=${{ env.AWS_REGION }}"
-          echo "PROJECT_NAME=${{ env.PROJECT_NAME }}"
-          echo "BUCKET_NAME=${{ env.BUCKET_NAME }}"
+    - name: Ensure S3 State Bucket Exists
+      run: |
+        chmod +x devops/scripts/infra-manager.sh
+        devops/scripts/infra-manager.sh verify
 
-      - name: Validate Region
-        run: |
-          # Get current region from AWS CLI configuration or environment
-          CURRENT_REGION=${AWS_DEFAULT_REGION:-$(aws configure get region)}
-          if [ "$CURRENT_REGION" != "${{ env.AWS_REGION }}" ]; then
-            echo "❌ Wrong region configured: $CURRENT_REGION. Must be ${{ env.AWS_REGION }}"
-            exit 1
-          fi
-          echo "✅ Region validated: ${{ env.AWS_REGION }}"
+    - name: Set Dynamic Variables
+      run: |
+        echo "Using GitHub repository variables:"
+        echo "CLUSTER_NAME=${{ env.CLUSTER_NAME }}"
+        echo "AWS_REGION=${{ env.AWS_REGION }}"
+        echo "PROJECT_NAME=${{ env.PROJECT_NAME }}"
+        echo "BUCKET_NAME=${{ env.BUCKET_NAME }}"
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Deploy State Resources
-        id: state
-        run: |
-          cd devops/terraform/00_state
-          terraform init -reconfigure
-          terraform apply -auto-approve \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}"
-
-      - name: Deploy Network Resources
-        id: network
-        run: |
-          cd devops/terraform/01_network
-          terraform init -reconfigure \
-            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
-            -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="encrypt=true"
-          terraform apply -auto-approve \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}" \
-            -var="cluster_name=${{ env.CLUSTER_NAME }}"
-
-      - name: Wait for Network State File in S3
-        run: |
-          for i in {1..10}; do
-            if aws s3api head-object --bucket ${{ env.BUCKET_NAME }} --key "${{ env.ENVIRONMENT }}/network/terraform.tfstate"; then
-              echo "State file found!"
-              exit 0
-            else
-              echo "State file not found, retrying in 5 seconds... ($i/10)"
-              sleep 5
-            fi
-          done
-          echo "State file not found after waiting."
+    - name: Validate Region
+      run: |
+        # Get current region from AWS CLI configuration or environment
+        CURRENT_REGION=${AWS_DEFAULT_REGION:-$(aws configure get region)}
+        if [ "$CURRENT_REGION" != "${{ env.AWS_REGION }}" ]; then
+          echo "❌ Wrong region configured: $CURRENT_REGION. Must be ${{ env.AWS_REGION }}"
           exit 1
+        fi
+        echo "✅ Region validated: ${{ env.AWS_REGION }}"
 
-      - name: Set Environment-Specific Role Name
-        run: |
-          if [[ "${{ env.ENVIRONMENT }}" == "production" ]]; then
-            echo "EKS_CLUSTER_ROLE=production-${{ env.PROJECT_NAME }}-cluster-role" >> $GITHUB_ENV
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Deploy State Resources
+      id: state
+      run: |
+        cd devops/terraform/00_state
+        terraform init -reconfigure
+        terraform apply -auto-approve \
+          -var="aws_region=${{ env.AWS_REGION }}" \
+          -var="project_name=${{ env.PROJECT_NAME }}" \
+          -var="environment=${{ env.ENVIRONMENT }}"
+
+    - name: Deploy Network Resources
+      id: network
+      run: |
+        cd devops/terraform/01_network
+        terraform init -reconfigure \
+          -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+          -backend-config="key=${{ env.ENVIRONMENT }}/network/terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}" \
+          -backend-config="encrypt=true"
+        terraform apply -auto-approve \
+          -var="aws_region=${{ env.AWS_REGION }}" \
+          -var="project_name=${{ env.PROJECT_NAME }}" \
+          -var="environment=${{ env.ENVIRONMENT }}" \
+          -var="cluster_name=${{ env.CLUSTER_NAME }}"
+
+    - name: Wait for Network State File in S3
+      run: |
+        for i in {1..10}; do
+          if aws s3api head-object --bucket ${{ env.BUCKET_NAME }} --key "${{ env.ENVIRONMENT }}/network/terraform.tfstate"; then
+            echo "State file found!"
+            exit 0
           else
-            echo "EKS_CLUSTER_ROLE=staging-${{ env.PROJECT_NAME }}-cluster-role" >> $GITHUB_ENV
+            echo "State file not found, retrying in 5 seconds... ($i/10)"
+            sleep 5
           fi
+        done
+        echo "State file not found after waiting."
+        exit 1
 
-      - name: Deploy EKS Resources
-        id: eks
-        run: |
-          cd devops/terraform/02_eks
-          terraform init -reconfigure \
-            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
-            -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="encrypt=true"
-          terraform apply -auto-approve \
-            -var="cluster_name=${{ env.CLUSTER_NAME }}" \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}" \
-            -var="cluster_role_name=${{ env.EKS_CLUSTER_ROLE }}"
+    - name: Set Environment-Specific Role Name
+      run: |
+        if [[ "${{ env.ENVIRONMENT }}" == "production" ]]; then
+          echo "EKS_CLUSTER_ROLE=production-${{ env.PROJECT_NAME }}-cluster-role" >> $GITHUB_ENV
+        else
+          echo "EKS_CLUSTER_ROLE=staging-${{ env.PROJECT_NAME }}-cluster-role" >> $GITHUB_ENV
+        fi
 
-      - name: Deploy Monitoring Resources
-        id: monitoring
-        run: |
-          cd devops/terraform/03_monitoring
-          terraform init -reconfigure \
-            -backend-config="bucket=${{ env.BUCKET_NAME }}" \
-            -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="encrypt=true"
-          terraform apply -auto-approve \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}"
+    - name: Deploy EKS Resources
+      id: eks
+      run: |
+        cd devops/terraform/02_eks
+        terraform init -reconfigure \
+          -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+          -backend-config="key=${{ env.ENVIRONMENT }}/eks/terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}" \
+          -backend-config="encrypt=true"
 
-      - name: Verify EKS Deployment
-        id: verify_eks
-        run: |
-          echo "🔍 Verifying EKS deployment..."
-
-          # Wait for cluster to be active
-          echo "⏳ Waiting for cluster to be active..."
-          aws eks wait cluster-active --name ${{ env.CLUSTER_NAME }}
-
-          # Get cluster endpoint
-          CLUSTER_ENDPOINT=$(aws eks describe-cluster \
-            --name ${{ env.CLUSTER_NAME }} \
-            --query "cluster.endpoint" \
-            --output text)
-
-          # Get cluster status
-          CLUSTER_STATUS=$(aws eks describe-cluster \
-            --name ${{ env.CLUSTER_NAME }} \
-            --query "cluster.status" \
-            --output text)
-
-          echo "CLUSTER_ENDPOINT=$CLUSTER_ENDPOINT" >> $GITHUB_ENV
-          echo "CLUSTER_STATUS=$CLUSTER_STATUS" >> $GITHUB_ENV
-
-          if [ "$CLUSTER_STATUS" = "ACTIVE" ]; then
-            echo "✅ EKS cluster is active"
-            echo "CLUSTER_VERIFIED=true" >> $GITHUB_ENV
+        # Import pre-existing IRSA role if it already exists to avoid EntityAlreadyExists
+        EBS_CSI_ROLE_NAME="${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-ebs-csi-role"
+        set +e
+        terraform state list | grep -q '^aws_iam_role.ebs_csi$'
+        IN_STATE=$?
+        set -e
+        if [ $IN_STATE -ne 0 ]; then
+          if aws iam get-role --role-name "$EBS_CSI_ROLE_NAME" >/dev/null 2>&1; then
+            echo "🔎 Importing existing IAM role into state: $EBS_CSI_ROLE_NAME"
+            set +e
+            terraform import -input=false aws_iam_role.ebs_csi "$EBS_CSI_ROLE_NAME" || true
+            set -e
           else
-            echo "❌ EKS cluster is not active"
-            echo "CLUSTER_VERIFIED=false" >> $GITHUB_ENV
-            exit 1
+            echo "ℹ️ IRSA role not found in AWS; Terraform will create it."
           fi
+        else
+          echo "ℹ️ IRSA role already managed in Terraform state; skipping import."
+        fi
 
-      - name: Verify Network Resources
-        id: verify_network
-        run: |
-          echo "🔍 Verifying network resources..."
-
-          # Check VPC
-          VPC_ID=$(aws ec2 describe-vpcs \
-            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
-                     "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
-            --query "Vpcs[0].VpcId" \
-            --output text)
-
-          if [ "$VPC_ID" != "None" ]; then
-            echo "✅ VPC found: $VPC_ID"
-          else
-            echo "❌ VPC not found"
-            exit 1
-          fi
-
-          # Check subnets
-          SUBNET_COUNT=$(aws ec2 describe-subnets \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query "length(Subnets)")
-
-          if [ "$SUBNET_COUNT" -ge 4 ]; then
-            echo "✅ Found $SUBNET_COUNT subnets"
-          else
-            echo "❌ Expected at least 4 subnets, found $SUBNET_COUNT"
-            exit 1
-          fi
-
-      - name: Verify Monitoring Resources
-        id: verify_monitoring
-        run: |
-          echo "🔍 Verifying monitoring resources..."
-
-          # Check CloudWatch Dashboard with correct naming pattern
-          DASHBOARD_NAME="${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-${{ env.CLUSTER_NAME }}-dashboard"
-          echo "🔍 Looking for dashboard: $DASHBOARD_NAME"
-
-          DASHBOARD=$(aws cloudwatch get-dashboard \
-            --dashboard-name "$DASHBOARD_NAME" \
-            --query "DashboardBody" \
-            --output text 2>/dev/null || echo "None")
-
-          if [ "$DASHBOARD" != "None" ]; then
-            echo "✅ CloudWatch Dashboard found: $DASHBOARD_NAME"
-          else
-            echo "❌ CloudWatch Dashboard not found: $DASHBOARD_NAME"
-            
-            # List all dashboards for debugging
-            echo "🔍 Available dashboards:"
-            aws cloudwatch list-dashboards --query "DashboardEntries[*].DashboardName" --output table || true
-            exit 1
-          fi
-
-          # Check CloudWatch Alarms with better error handling
-          echo "🔍 Checking CloudWatch Alarms..."
-          ALARM_COUNT=$(aws cloudwatch describe-alarms \
-            --query "length(MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')])" \
-            --output text 2>/dev/null || echo "0")
-
-          if [ "$ALARM_COUNT" -gt 0 ]; then
-            echo "✅ Found $ALARM_COUNT CloudWatch Alarms"
-          else
-            echo "⚠️ No CloudWatch Alarms found with tags"
-            
-            # Try alternative search by name pattern
-            PATTERN_ALARMS=$(aws cloudwatch describe-alarms \
-              --query "MetricAlarms[?contains(AlarmName, '${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-${{ env.CLUSTER_NAME }}')]" \
-              --output text 2>/dev/null || echo "")
-            
-            if [ ! -z "$PATTERN_ALARMS" ] && [ "$PATTERN_ALARMS" != "None" ]; then
-              echo "✅ Found alarms by name pattern"
+        # Import existing OIDC provider if the cluster already exists; otherwise Terraform will create it
+        if aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} >/dev/null 2>&1; then
+          OIDC_ISSUER=$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.identity.oidc.issuer" --output text)
+          OIDC_HOST=${OIDC_ISSUER#https://}
+          OIDC_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:oidc-provider/${OIDC_HOST}"
+          if aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_ARN" >/dev/null 2>&1; then
+            echo "🔎 Importing existing OIDC provider into state: $OIDC_ARN"
+            set +e
+            terraform state show aws_iam_openid_connect_provider.eks >/dev/null 2>&1
+            OIDC_IN_STATE=$?
+            set -e
+            if [ $OIDC_IN_STATE -ne 0 ]; then
+              set +e
+              terraform import -input=false aws_iam_openid_connect_provider.eks "$OIDC_ARN"
+              set -e || true
             else
-              echo "❌ No CloudWatch Alarms found"
-              echo "🔍 Available alarms:"
-              aws cloudwatch describe-alarms --query "MetricAlarms[*].AlarmName" --output table || true
-              exit 1
+              echo "ℹ️ OIDC provider already managed in state; skipping import."
             fi
           fi
+        else
+          echo "ℹ️ Cluster not found yet; skipping OIDC provider import (Terraform will create it)."
+        fi
+        terraform apply -auto-approve \
+          -var="cluster_name=${{ env.CLUSTER_NAME }}" \
+          -var="aws_region=${{ env.AWS_REGION }}" \
+          -var="project_name=${{ env.PROJECT_NAME }}" \
+          -var="environment=${{ env.ENVIRONMENT }}" \
+          -var="cluster_role_name=${{ env.EKS_CLUSTER_ROLE }}" \
+          -var="gha_actions_role_arn=${{ secrets.AWS_ROLE_ARN }}" \
+          -var="enable_ebs_csi_addon=false"
 
-      - name: Export EKS Details
-        id: eks_output
-        if: success()
-        run: |
-          ENDPOINT=$(aws eks describe-cluster \
-            --name ${{ env.CLUSTER_NAME }} \
-            --query "cluster.endpoint" \
-            --output text)
-          echo "cluster_endpoint=${ENDPOINT}" >> $GITHUB_OUTPUT
 
-      - name: Generate Resource Summary
-        id: resource_summary
-        if: success()
-        run: |
-          echo "🔍 Generating comprehensive resource summary..."
+    - name: Skip IAM Resources (Using Manual OIDC Role)
+      id: iam
+      run: |
+        echo "ℹ️ Skipping IAM deployment - using manually created OIDC role"
+        echo "Role ARN: ${{ secrets.AWS_ROLE_ARN }}"
 
-          # Get VPC ID for filtering
-          VPC_ID=$(aws ec2 describe-vpcs \
-            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
-                     "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
-            --query "Vpcs[0].VpcId" \
-            --output text)
+    - name: Deploy Monitoring Resources
+      id: monitoring
+      run: |
+        cd devops/terraform/03_monitoring
+        terraform init -reconfigure \
+          -backend-config="bucket=${{ env.BUCKET_NAME }}" \
+          -backend-config="key=${{ env.ENVIRONMENT }}/monitoring/terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}" \
+          -backend-config="encrypt=true"
+        terraform apply -auto-approve \
+          -var="aws_region=${{ env.AWS_REGION }}" \
+          -var="project_name=${{ env.PROJECT_NAME }}" \
+          -var="environment=${{ env.ENVIRONMENT }}"
 
-          if [ "$VPC_ID" = "None" ] || [ -z "$VPC_ID" ]; then
-            echo "❌ VPC not found for resource counting"
+    - name: Verify EKS Deployment
+      id: verify_eks
+      run: |
+        echo "🔍 Verifying EKS deployment..."
+
+        # Wait for cluster to be active
+        echo "⏳ Waiting for cluster to be active..."
+        aws eks wait cluster-active --name ${{ env.CLUSTER_NAME }}
+
+        # Get cluster endpoint
+        CLUSTER_ENDPOINT=$(aws eks describe-cluster \
+          --name ${{ env.CLUSTER_NAME }} \
+          --query "cluster.endpoint" \
+          --output text)
+
+        # Get cluster status
+        CLUSTER_STATUS=$(aws eks describe-cluster \
+          --name ${{ env.CLUSTER_NAME }} \
+          --query "cluster.status" \
+          --output text)
+
+        echo "CLUSTER_ENDPOINT=$CLUSTER_ENDPOINT" >> $GITHUB_ENV
+        echo "CLUSTER_STATUS=$CLUSTER_STATUS" >> $GITHUB_ENV
+
+        if [ "$CLUSTER_STATUS" = "ACTIVE" ]; then
+          echo "✅ EKS cluster is active"
+          echo "CLUSTER_VERIFIED=true" >> $GITHUB_ENV
+        else
+          echo "❌ EKS cluster is not active"
+          echo "CLUSTER_VERIFIED=false" >> $GITHUB_ENV
+          exit 1
+        fi
+
+    - name: Verify Network Resources
+      id: verify_network
+      run: |
+        echo "🔍 Verifying network resources..."
+
+        # Check VPC
+        VPC_ID=$(aws ec2 describe-vpcs \
+          --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
+                   "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+          --query "Vpcs[0].VpcId" \
+          --output text)
+
+        if [ "$VPC_ID" != "None" ]; then
+          echo "✅ VPC found: $VPC_ID"
+        else
+          echo "❌ VPC not found"
+          exit 1
+        fi
+
+        # Check subnets
+        SUBNET_COUNT=$(aws ec2 describe-subnets \
+          --filters "Name=vpc-id,Values=$VPC_ID" \
+          --query "length(Subnets)")
+
+        if [ "$SUBNET_COUNT" -ge 4 ]; then
+          echo "✅ Found $SUBNET_COUNT subnets"
+        else
+          echo "❌ Expected at least 4 subnets, found $SUBNET_COUNT"
+          exit 1
+        fi
+
+    - name: Verify Monitoring Resources
+      id: verify_monitoring
+      run: |
+        echo "🔍 Verifying monitoring resources..."
+
+        # Check CloudWatch Dashboard with correct naming pattern
+        DASHBOARD_NAME="${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-${{ env.CLUSTER_NAME }}-dashboard"
+        echo "🔍 Looking for dashboard: $DASHBOARD_NAME"
+
+        DASHBOARD=$(aws cloudwatch get-dashboard \
+          --dashboard-name "$DASHBOARD_NAME" \
+          --query "DashboardBody" \
+          --output text 2>/dev/null || echo "None")
+
+        if [ "$DASHBOARD" != "None" ]; then
+          echo "✅ CloudWatch Dashboard found: $DASHBOARD_NAME"
+        else
+          echo "❌ CloudWatch Dashboard not found: $DASHBOARD_NAME"
+          
+          # List all dashboards for debugging
+          echo "🔍 Available dashboards:"
+          aws cloudwatch list-dashboards --query "DashboardEntries[*].DashboardName" --output table || true
+          exit 1
+        fi
+
+        # Check CloudWatch Alarms with better error handling
+        echo "🔍 Checking CloudWatch Alarms..."
+        ALARM_COUNT=$(aws cloudwatch describe-alarms \
+          --query "length(MetricAlarms[?contains(Tags[?Key=='Project'].Value, '${{ env.PROJECT_NAME }}') && contains(Tags[?Key=='Environment'].Value, '${{ env.ENVIRONMENT }}')])" \
+          --output text 2>/dev/null || echo "0")
+
+        if [ "$ALARM_COUNT" -gt 0 ]; then
+          echo "✅ Found $ALARM_COUNT CloudWatch Alarms"
+        else
+          echo "⚠️ No CloudWatch Alarms found with tags"
+          
+          # Try alternative search by name pattern
+          PATTERN_ALARMS=$(aws cloudwatch describe-alarms \
+            --query "MetricAlarms[?contains(AlarmName, '${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-${{ env.CLUSTER_NAME }}')]" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ ! -z "$PATTERN_ALARMS" ] && [ "$PATTERN_ALARMS" != "None" ]; then
+            echo "✅ Found alarms by name pattern"
+          else
+            echo "❌ No CloudWatch Alarms found"
+            echo "🔍 Available alarms:"
+            aws cloudwatch describe-alarms --query "MetricAlarms[*].AlarmName" --output table || true
             exit 1
           fi
+        fi
 
-          echo "📊 VPC ID: $VPC_ID"
+    - name: Export EKS Details
+      id: eks_output
+      if: success()
+      run: |
+        ENDPOINT=$(aws eks describe-cluster \
+          --name ${{ env.CLUSTER_NAME }} \
+          --query "cluster.endpoint" \
+          --output text)
+        echo "cluster_endpoint=${ENDPOINT}" >> $GITHUB_OUTPUT
 
-          # Count Subnets
-          SUBNET_COUNT=$(aws ec2 describe-subnets \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query "length(Subnets)" \
-            --output text)
 
-          # Count Route Tables
-          RT_COUNT=$(aws ec2 describe-route-tables \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query "length(RouteTables)" \
-            --output text)
+    - name: Generate Resource Summary
+      id: resource_summary
+      if: success()
+      run: |
+        echo "🔍 Generating comprehensive resource summary..."
 
-          # Count Internet Gateways
-          IGW_COUNT=$(aws ec2 describe-internet-gateways \
-            --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
-            --query "length(InternetGateways)" \
-            --output text)
+        # Get VPC ID for filtering
+        VPC_ID=$(aws ec2 describe-vpcs \
+          --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
+                   "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+          --query "Vpcs[0].VpcId" \
+          --output text)
 
-          # Count VPC Endpoints
-          ENDPOINT_COUNT=$(aws ec2 describe-vpc-endpoints \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query "length(VpcEndpoints)" \
-            --output text)
+        if [ "$VPC_ID" = "None" ] || [ -z "$VPC_ID" ]; then
+          echo "❌ VPC not found for resource counting"
+          exit 1
+        fi
 
-          # Count Security Groups
-          SG_COUNT=$(aws ec2 describe-security-groups \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query "length(SecurityGroups)" \
-            --output text)
+        echo "📊 VPC ID: $VPC_ID"
 
-          # Count NAT Gateways
-          NAT_COUNT=$(aws ec2 describe-nat-gateways \
-            --filter "Name=vpc-id,Values=$VPC_ID" \
-            --query "length(NatGateways)" \
-            --output text)
+        # Count Subnets
+        SUBNET_COUNT=$(aws ec2 describe-subnets \
+          --filters "Name=vpc-id,Values=$VPC_ID" \
+          --query "length(Subnets)" \
+          --output text)
 
-          # Count EIPs
-          EIP_COUNT=$(aws ec2 describe-addresses \
-            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
-                     "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
-            --query "length(Addresses)" \
-            --output text)
+        # Count Route Tables
+        RT_COUNT=$(aws ec2 describe-route-tables \
+          --filters "Name=vpc-id,Values=$VPC_ID" \
+          --query "length(RouteTables)" \
+          --output text)
 
-          # Count Network ACLs
-          NACL_COUNT=$(aws ec2 describe-network-acls \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query "length(NetworkAcls)" \
-            --output text)
+        # Count Internet Gateways
+        IGW_COUNT=$(aws ec2 describe-internet-gateways \
+          --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+          --query "length(InternetGateways)" \
+          --output text)
 
-          # Count EKS Clusters
-          EKS_COUNT=$(aws eks list-clusters \
-            --query "length(clusters[?@ && contains(@, '${{ env.CLUSTER_NAME }}')])" \
-            --output text)
+        # Count VPC Endpoints
+        ENDPOINT_COUNT=$(aws ec2 describe-vpc-endpoints \
+          --filters "Name=vpc-id,Values=$VPC_ID" \
+          --query "length(VpcEndpoints)" \
+          --output text)
 
-          # Count CloudWatch Dashboards
-          DASHBOARD_COUNT=$(aws cloudwatch list-dashboards \
-            --query "length(DashboardEntries[?DashboardName && contains(DashboardName, '${{ env.PROJECT_NAME }}') && contains(DashboardName, '${{ env.ENVIRONMENT }}')])" \
-            --output text)
+        # Count Security Groups
+        SG_COUNT=$(aws ec2 describe-security-groups \
+          --filters "Name=vpc-id,Values=$VPC_ID" \
+          --query "length(SecurityGroups)" \
+          --output text)
 
-          # Count CloudWatch Alarms  
-          ALARM_COUNT=$(aws cloudwatch describe-alarms \
-            --query "length(MetricAlarms[?Tags && length(Tags[?Key=='Project' && Value=='${{ env.PROJECT_NAME }}']) > \`0\` && length(Tags[?Key=='Environment' && Value=='${{ env.ENVIRONMENT }}']) > \`0\`])" \
-            --output text)
+        # Count NAT Gateways
+        NAT_COUNT=$(aws ec2 describe-nat-gateways \
+          --filter "Name=vpc-id,Values=$VPC_ID" \
+          --query "length(NatGateways)" \
+          --output text)
 
-          # Store counts in environment variables
-          echo "SUBNET_COUNT=$SUBNET_COUNT" >> $GITHUB_ENV
-          echo "RT_COUNT=$RT_COUNT" >> $GITHUB_ENV
-          echo "IGW_COUNT=$IGW_COUNT" >> $GITHUB_ENV
-          echo "ENDPOINT_COUNT=$ENDPOINT_COUNT" >> $GITHUB_ENV
-          echo "SG_COUNT=$SG_COUNT" >> $GITHUB_ENV
-          echo "NAT_COUNT=$NAT_COUNT" >> $GITHUB_ENV
-          echo "EIP_COUNT=$EIP_COUNT" >> $GITHUB_ENV
-          echo "NACL_COUNT=$NACL_COUNT" >> $GITHUB_ENV
-          echo "EKS_COUNT=$EKS_COUNT" >> $GITHUB_ENV
-          echo "DASHBOARD_COUNT=$DASHBOARD_COUNT" >> $GITHUB_ENV
-          echo "ALARM_COUNT=$ALARM_COUNT" >> $GITHUB_ENV
+        # Count EIPs
+        EIP_COUNT=$(aws ec2 describe-addresses \
+          --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
+                   "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+          --query "length(Addresses)" \
+          --output text)
 
-          # Calculate total resources
-          TOTAL_RESOURCES=$((SUBNET_COUNT + RT_COUNT + IGW_COUNT + ENDPOINT_COUNT + SG_COUNT + NAT_COUNT + EIP_COUNT + NACL_COUNT + EKS_COUNT + DASHBOARD_COUNT + ALARM_COUNT))
-          echo "TOTAL_RESOURCES=$TOTAL_RESOURCES" >> $GITHUB_ENV
+        # Count Network ACLs
+        NACL_COUNT=$(aws ec2 describe-network-acls \
+          --filters "Name=vpc-id,Values=$VPC_ID" \
+          --query "length(NetworkAcls)" \
+          --output text)
 
-          echo "✅ Resource counting completed!"
+        # Count EKS Clusters
+        EKS_COUNT=$(aws eks list-clusters \
+          --query "length(clusters[?@ && contains(@, '${{ env.CLUSTER_NAME }}')])" \
+          --output text)
 
-      - name: Display Resource Summary
-        if: success()
-        run: |
-          echo "### 🏗️ Infrastructure Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** \`${{ env.ENVIRONMENT }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Project:** \`${{ env.PROJECT_NAME }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Region:** \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Timestamp:** \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+        # Count CloudWatch Dashboards
+        DASHBOARD_COUNT=$(aws cloudwatch list-dashboards \
+          --query "length(DashboardEntries[?DashboardName && contains(DashboardName, '${{ env.PROJECT_NAME }}') && contains(DashboardName, '${{ env.ENVIRONMENT }}')])" \
+          --output text)
 
-          echo "### 📊 Resource Counts" >> $GITHUB_STEP_SUMMARY
-          echo "| Resource Type | Count | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------------|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **VPC** | 1 | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Subnets** | ${{ env.SUBNET_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Route Tables** | ${{ env.RT_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Internet Gateways** | ${{ env.IGW_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **VPC Endpoints** | ${{ env.ENDPOINT_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Security Groups** | ${{ env.SG_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **NAT Gateways** | ${{ env.NAT_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Elastic IPs** | ${{ env.EIP_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Network ACLs** | ${{ env.NACL_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **EKS Clusters** | ${{ env.EKS_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **CloudWatch Dashboards** | ${{ env.DASHBOARD_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| **CloudWatch Alarms** | ${{ env.ALARM_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+        # Count CloudWatch Alarms  
+        ALARM_COUNT=$(aws cloudwatch describe-alarms \
+          --query "length(MetricAlarms[?Tags && length(Tags[?Key=='Project' && Value=='${{ env.PROJECT_NAME }}']) > \`0\` && length(Tags[?Key=='Environment' && Value=='${{ env.ENVIRONMENT }}']) > \`0\`])" \
+          --output text)
 
-          echo "### 🔗 EKS Cluster Details" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Cluster Name** | \`${{ env.CLUSTER_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Cluster Status** | \`${{ env.CLUSTER_STATUS }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Cluster Endpoint** | \`${{ env.CLUSTER_ENDPOINT }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Kubernetes Version** | \`1.31\` |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+        # Store counts in environment variables
+        echo "SUBNET_COUNT=$SUBNET_COUNT" >> $GITHUB_ENV
+        echo "RT_COUNT=$RT_COUNT" >> $GITHUB_ENV
+        echo "IGW_COUNT=$IGW_COUNT" >> $GITHUB_ENV
+        echo "ENDPOINT_COUNT=$ENDPOINT_COUNT" >> $GITHUB_ENV
+        echo "SG_COUNT=$SG_COUNT" >> $GITHUB_ENV
+        echo "NAT_COUNT=$NAT_COUNT" >> $GITHUB_ENV
+        echo "EIP_COUNT=$EIP_COUNT" >> $GITHUB_ENV
+        echo "NACL_COUNT=$NACL_COUNT" >> $GITHUB_ENV
+        echo "EKS_COUNT=$EKS_COUNT" >> $GITHUB_ENV
+        echo "DASHBOARD_COUNT=$DASHBOARD_COUNT" >> $GITHUB_ENV
+        echo "ALARM_COUNT=$ALARM_COUNT" >> $GITHUB_ENV
 
-          echo "### 🎯 Deployment Status" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ env.CLUSTER_VERIFIED }}" = "true" ]; then
-            echo "**Status:** ✅ **SUCCESS** - All resources deployed successfully!" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "**Status:** ❌ **FAILED** - Some resources failed to deploy" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
+        # Calculate total resources
+        TOTAL_RESOURCES=$((SUBNET_COUNT + RT_COUNT + IGW_COUNT + ENDPOINT_COUNT + SG_COUNT + NAT_COUNT + EIP_COUNT + NACL_COUNT + EKS_COUNT + DASHBOARD_COUNT + ALARM_COUNT))
+        echo "TOTAL_RESOURCES=$TOTAL_RESOURCES" >> $GITHUB_ENV
 
-          echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Terraform Version: \`${{ env.TF_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- AWS Region: \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Project: \`${{ env.PROJECT_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Resource counting completed!"
+
+    - name: Display Resource Summary
+      if: success()
+      run: |
+        echo "### 🏗️ Infrastructure Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment:** \`${{ env.ENVIRONMENT }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Project:** \`${{ env.PROJECT_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Region:** \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Timestamp:** \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        echo "### 📊 Resource Counts" >> $GITHUB_STEP_SUMMARY
+        echo "| Resource Type | Count | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------------|-------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| **VPC** | 1 | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Subnets** | ${{ env.SUBNET_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Route Tables** | ${{ env.RT_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Internet Gateways** | ${{ env.IGW_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **VPC Endpoints** | ${{ env.ENDPOINT_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Security Groups** | ${{ env.SG_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **NAT Gateways** | ${{ env.NAT_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Elastic IPs** | ${{ env.EIP_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Network ACLs** | ${{ env.NACL_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **EKS Clusters** | ${{ env.EKS_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **CloudWatch Dashboards** | ${{ env.DASHBOARD_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| **CloudWatch Alarms** | ${{ env.ALARM_COUNT }} | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        echo "### 🔗 EKS Cluster Details" >> $GITHUB_STEP_SUMMARY
+        echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| **Cluster Name** | \`${{ env.CLUSTER_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Cluster Status** | \`${{ env.CLUSTER_STATUS }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Cluster Endpoint** | \`${{ env.CLUSTER_ENDPOINT }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Kubernetes Version** | \`1.31\` |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        echo "### 🎯 Deployment Status" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ env.CLUSTER_VERIFIED }}" = "true" ]; then
+          echo "**Status:** ✅ **SUCCESS** - All resources deployed successfully!" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**Status:** ❌ **FAILED** - Some resources failed to deploy" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Terraform Version: \`${{ env.TF_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- AWS Region: \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Project: \`${{ env.PROJECT_NAME }}\`" >> $GITHUB_STEP_SUMMARY

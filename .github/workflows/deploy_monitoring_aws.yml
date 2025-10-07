@@ -44,11 +44,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
+      - name: Get IAM Role ARN
+        id: iam_role_arn
+        run: |
+          # Try to get role ARN from IAM Terraform state
+          cd devops/terraform/04_iam
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ vars.BUCKET_NAME || 'vanillatstodo-terraform-state' }}" \
+            -backend-config="key=${{ env.ENVIRONMENT }}/iam/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true" >/dev/null 2>&1 || true
+          
+          # Check if IAM resources exist and get role ARN
+          if terraform output -raw github_actions_role_arn 2>/dev/null; then
+            ROLE_ARN=$(terraform output -raw github_actions_role_arn)
+            echo "github_actions_role_arn=${ROLE_ARN}" >> $GITHUB_OUTPUT
+            echo "✅ Found IAM role ARN: ${ROLE_ARN}"
+          else
+            # Fallback to secret if IAM state not available
+            ROLE_ARN="${{ secrets.AWS_ROLE_ARN }}"
+            echo "github_actions_role_arn=${ROLE_ARN}" >> $GITHUB_OUTPUT
+            echo "⚠️ Using fallback role ARN from secrets"
+          fi
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ steps.iam_role_arn.outputs.github_actions_role_arn }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install kubectl
@@ -66,13 +88,19 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --name ${{ env.CLUSTER_NAME }} \
-            --region ${{ env.AWS_REGION }}
+            --region ${{ env.AWS_REGION }} \
+            --role-arn ${{ steps.iam_role_arn.outputs.github_actions_role_arn }}
 
       - name: Verify Cluster Connection
         run: |
           echo "🔍 Verifying cluster connection..."
           kubectl cluster-info
           kubectl get nodes
+          
+          echo ""
+          echo "🔍 Checking cluster resources..."
+          kubectl top nodes || echo "❌ Metrics server not available"
+          kubectl get nodes -o custom-columns=NAME:.metadata.name,STATUS:.status.conditions[-1].type,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory
 
       - name: Add Helm Repositories
         run: |
@@ -86,6 +114,20 @@ jobs:
           echo "🏗️ Creating monitoring namespace..."
           kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Inspect Storage and Events
+        if: env.ACTION == 'install' || env.ACTION == 'upgrade'
+        run: |
+          echo "🧰 Inspecting storage classes and default class..."
+          kubectl get storageclass
+          kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}* { .metadata.name }{"\n"}{end}' || true
+          
+          echo "🔍 Checking EBS CSI driver status..."
+          kubectl get pods -n kube-system | grep ebs-csi || echo "❌ EBS CSI driver not found"
+          kubectl get csidriver ebs.csi.aws.com || echo "❌ EBS CSI driver not registered"
+          
+          echo "🧾 Recent events in monitoring namespace (if exists)"
+          kubectl get events -n monitoring --sort-by=.lastTimestamp | tail -n 100 || true
+
       - name: Install/Upgrade Monitoring Stack
         if: env.ACTION == 'install' || env.ACTION == 'upgrade'
         run: |
@@ -98,15 +140,70 @@ jobs:
           cd devops/helm-chart-monitoring
           helm dependency update
 
-          # Install or upgrade
+          # Install or upgrade with debug and non-fatal exit to allow diagnostics
+          echo "🔍 Installing (with debug) and capturing failure details if any..."
+          # Detect working StorageClass (prefer gp3, fallback to gp2, then any available)
+          DEFAULT_SC=$(kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{"\n"}{end}')
+          if [ -z "$DEFAULT_SC" ]; then
+            # Try gp3 first (newer, better performance)
+            if kubectl get storageclass gp3 >/dev/null 2>&1; then
+              DEFAULT_SC="gp3"
+              echo "✅ Using gp3 StorageClass"
+            # Fallback to gp2
+            elif kubectl get storageclass gp2 >/dev/null 2>&1; then
+              DEFAULT_SC="gp2"
+              echo "⚠️ Using gp2 StorageClass (gp3 not available)"
+            # Last resort: use any available
+            else
+              DEFAULT_SC=$(kubectl get storageclass -o jsonpath='{.items[0].metadata.name}')
+              echo "⚠️ Using first available StorageClass: $DEFAULT_SC"
+            fi
+          else
+            echo "✅ Default StorageClass detected: $DEFAULT_SC"
+          fi
+          set +e
           helm upgrade --install ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} . \
             --namespace monitoring \
             -f values-${{ env.ENVIRONMENT }}.yaml \
-            --wait --timeout=600s \
+            --wait --timeout=1200s \
+            --debug \
             --set global.project=${{ env.APP_NAME }} \
             --set global.cluster_name=${{ env.CLUSTER_NAME }} \
             --set global.environment=${{ env.ENVIRONMENT }} \
-            --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }}
+            --set prometheus-stack.grafana.adminPassword=${{ secrets.GRAFANA_PWD }} \
+            --set prometheus-stack.grafana.persistence.storageClassName=$DEFAULT_SC \
+            --set prometheus-stack.prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName=$DEFAULT_SC \
+            --set prometheus-stack.prometheus.prometheusSpec.resources.limits.cpu=500m \
+            --set prometheus-stack.prometheus.prometheusSpec.resources.limits.memory=1Gi \
+            --set prometheus-stack.prometheus.prometheusSpec.resources.requests.cpu=200m \
+            --set prometheus-stack.prometheus.prometheusSpec.resources.requests.memory=512Mi \
+            --set prometheus-stack.grafana.resources.limits.cpu=200m \
+            --set prometheus-stack.grafana.resources.limits.memory=512Mi \
+            --set prometheus-stack.grafana.resources.requests.cpu=100m \
+            --set prometheus-stack.grafana.resources.requests.memory=256Mi
+          HELM_EXIT_CODE=$?
+          set -e
+
+          if [ "$HELM_EXIT_CODE" -ne 0 ]; then
+            echo "❌ Helm reported failure (exit $HELM_EXIT_CODE). Collecting diagnostics..."
+            echo "--- Helm Release Status ---"
+            helm status ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} --namespace monitoring || true
+            echo "--- Helm Get All ---"
+            helm get all ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }} --namespace monitoring || true
+            echo "--- Kubernetes: Pods ---"
+            kubectl get pods -n monitoring -o wide || true
+            echo "--- Kubernetes: Describe Pods (problematic) ---"
+            for p in $(kubectl get pods -n monitoring --no-headers | awk '$3!="Running" || $4>0 {print $1}'); do
+              echo "Describing $p"; kubectl describe pod $p -n monitoring || true; done
+            echo "--- Kubernetes: Events ---"
+            kubectl get events -n monitoring --sort-by=.lastTimestamp | tail -n 200 || true
+            echo "--- Kubernetes: PVCs ---"
+            kubectl get pvc -n monitoring -o wide || true
+            echo "--- Kubernetes: Pending Pods with scheduling details ---"
+            kubectl get pod -n monitoring -o json | jq -r '.items[] | select(.status.phase=="Pending") | .metadata.name' | while read name; do
+              echo "Pod: $name"; kubectl describe pod -n monitoring "$name" | sed -n '/Events:/,$p' || true; done
+            exit $HELM_EXIT_CODE
+          fi
 
       - name: Uninstall Monitoring Stack
         if: env.ACTION == 'uninstall'
