@@ -157,13 +157,17 @@ jobs:
           terraform import -input=false aws_iam_role.ebs_csi "$EBS_CSI_ROLE_NAME" || true
         fi
 
-        # Import existing OIDC provider if present
-        OIDC_ISSUER=$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.identity.oidc.issuer" --output text)
-        OIDC_HOST=${OIDC_ISSUER#https://}
-        OIDC_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:oidc-provider/${OIDC_HOST}"
-        if aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_ARN" >/dev/null 2>&1; then
-          echo "🔎 Importing existing OIDC provider into state: $OIDC_ARN"
-          terraform import -input=false aws_iam_openid_connect_provider.eks "$OIDC_ARN" || true
+        # Import existing OIDC provider if the cluster already exists; otherwise Terraform will create it
+        if aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} >/dev/null 2>&1; then
+          OIDC_ISSUER=$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --query "cluster.identity.oidc.issuer" --output text)
+          OIDC_HOST=${OIDC_ISSUER#https://}
+          OIDC_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:oidc-provider/${OIDC_HOST}"
+          if aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_ARN" >/dev/null 2>&1; then
+            echo "🔎 Importing existing OIDC provider into state: $OIDC_ARN"
+            terraform import -input=false aws_iam_openid_connect_provider.eks "$OIDC_ARN" || true
+          fi
+        else
+          echo "ℹ️ Cluster not found yet; skipping OIDC provider import (Terraform will create it)."
         fi
         terraform apply -auto-approve \
           -var="cluster_name=${{ env.CLUSTER_NAME }}" \
