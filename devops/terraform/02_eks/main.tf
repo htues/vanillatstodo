@@ -162,8 +162,13 @@ resource "aws_iam_role" "ebs_csi" {
         Action = "sts:AssumeRoleWithWebIdentity",
         Condition = {
           StringEquals = {
-            "${replace(data.aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")}:aud" = "sts.amazonaws.com",
-            "${replace(data.aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+            "${replace(data.aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")}:aud" = "sts.amazonaws.com"
+          },
+          StringLike = {
+            "${replace(data.aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")}:sub" = [
+              "system:serviceaccount:kube-system:ebs-csi-controller-sa",
+              "system:serviceaccount:kube-system:ebs-csi-controller"
+            ]
           }
         }
       }
