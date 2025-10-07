@@ -153,16 +153,20 @@ jobs:
         # Import pre-existing IRSA role if it already exists to avoid EntityAlreadyExists
         EBS_CSI_ROLE_NAME="${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-ebs-csi-role"
         set +e
-        terraform state show aws_iam_role.ebs_csi >/dev/null 2>&1
+        terraform state list | grep -q '^aws_iam_role.ebs_csi$'
         IN_STATE=$?
         set -e
-        if [ $IN_STATE -ne 0 ] && aws iam get-role --role-name "$EBS_CSI_ROLE_NAME" >/dev/null 2>&1; then
-          echo "🔎 Importing existing IAM role into state: $EBS_CSI_ROLE_NAME"
-          set +e
-          terraform import -input=false aws_iam_role.ebs_csi "$EBS_CSI_ROLE_NAME"
-          set -e || true
+        if [ $IN_STATE -ne 0 ]; then
+          if aws iam get-role --role-name "$EBS_CSI_ROLE_NAME" >/dev/null 2>&1; then
+            echo "🔎 Importing existing IAM role into state: $EBS_CSI_ROLE_NAME"
+            set +e
+            terraform import -input=false aws_iam_role.ebs_csi "$EBS_CSI_ROLE_NAME" || true
+            set -e
+          else
+            echo "ℹ️ IRSA role not found in AWS; Terraform will create it."
+          fi
         else
-          echo "ℹ️ IRSA role already managed in state or not found; skipping import."
+          echo "ℹ️ IRSA role already managed in Terraform state; skipping import."
         fi
 
         # Import existing OIDC provider if the cluster already exists; otherwise Terraform will create it
