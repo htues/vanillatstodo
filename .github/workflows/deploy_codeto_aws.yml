@@ -111,8 +111,7 @@ jobs:
       run: |
         aws eks update-kubeconfig \
           --name ${{ env.CLUSTER_NAME }} \
-          --region ${{ env.AWS_REGION }} \
-          --role-arn ${{ steps.iam_role_arn.outputs.github_actions_role_arn }}
+          --region ${{ env.AWS_REGION }}
 
     - name: Verify Cluster Health
       run: |
