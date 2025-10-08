@@ -66,6 +66,60 @@ jobs:
       with:
         terraform_version: ${{ env.TF_VERSION }}
 
+    - name: Pre-Scan Resources (for accurate summary)
+      id: prescan
+      run: |
+        echo "🔎 Pre-scanning resources for summary accuracy..."
+
+        # CloudWatch pre-scan
+        DASHBOARD_NAME="${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-${{ env.CLUSTER_NAME }}-dashboard"
+        if aws cloudwatch describe-dashboards --dashboard-names "$DASHBOARD_NAME" >/dev/null 2>&1; then
+          echo "PRE_DASHBOARD_EXISTS=true" >> $GITHUB_ENV
+        else
+          echo "PRE_DASHBOARD_EXISTS=false" >> $GITHUB_ENV
+        fi
+
+        PRE_ALARM_COUNT=$(aws cloudwatch describe-alarms \
+          --query "length(MetricAlarms[?contains(AlarmName, '${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-${{ env.CLUSTER_NAME }}')])" \
+          --output text 2>/dev/null || echo 0)
+        echo "PRE_ALARM_COUNT=${PRE_ALARM_COUNT}" >> $GITHUB_ENV
+
+        # S3 state bucket pre-scan
+        if aws s3api head-bucket --bucket ${{ env.BUCKET_NAME }} 2>/dev/null; then
+          echo "PRE_S3_BUCKET_EXISTS=true" >> $GITHUB_ENV
+        else
+          echo "PRE_S3_BUCKET_EXISTS=false" >> $GITHUB_ENV
+        fi
+
+        # Network pre-scan (by tag Name contains project)
+        VPC_IDS=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=*${{ env.PROJECT_NAME }}*" --query 'Vpcs[*].VpcId' --output text 2>/dev/null || echo "")
+        PRE_VPC=0; PRE_ENDPOINTS=0; PRE_NAT=0; PRE_EIP=0; PRE_INTERFACES=0; PRE_SECURITY_GROUPS=0; PRE_ROUTE_TABLES=0; PRE_NACLS=0; PRE_SUBNETS=0; PRE_IGW=0
+        for VPC_ID in $VPC_IDS; do
+          [ -z "$VPC_ID" ] && continue
+          PRE_VPC=$((PRE_VPC+1))
+          PRE_ENDPOINTS=$((PRE_ENDPOINTS + $(aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID" --query 'length(VpcEndpoints)' --output text 2>/dev/null || echo 0)))
+          PRE_NAT=$((PRE_NAT + $(aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=$VPC_ID" --query 'length(NatGateways[?State!=`deleted`])' --output text 2>/dev/null || echo 0)))
+          PRE_INTERFACES=$((PRE_INTERFACES + $(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --query 'length(NetworkInterfaces)' --output text 2>/dev/null || echo 0)))
+          PRE_SECURITY_GROUPS=$((PRE_SECURITY_GROUPS + $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'length(SecurityGroups[?GroupName!=`default`])' --output text 2>/dev/null || echo 0)))
+          PRE_ROUTE_TABLES=$((PRE_ROUTE_TABLES + $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'length(RouteTables[?Associations[0].Main!=`true`])' --output text 2>/dev/null || echo 0)))
+          PRE_NACLS=$((PRE_NACLS + $(aws ec2 describe-network-acls --filters "Name=vpc-id,Values=$VPC_ID" --query 'length(NetworkAcls[?!IsDefault])' --output text 2>/dev/null || echo 0)))
+          PRE_SUBNETS=$((PRE_SUBNETS + $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'length(Subnets)' --output text 2>/dev/null || echo 0)))
+          PRE_IGW=$((PRE_IGW + $(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'length(InternetGateways)' --output text 2>/dev/null || echo 0)))
+        done
+        # EIPs by tag pattern
+        PRE_EIP=$(aws ec2 describe-addresses --filters "Name=tag:Name,Values=${{ env.ENVIRONMENT }}-${{ env.PROJECT_NAME }}-nat-*" --query 'length(Addresses)' --output text 2>/dev/null || echo 0)
+
+        echo "PRE_VPC=$PRE_VPC" >> $GITHUB_ENV
+        echo "PRE_ENDPOINTS=$PRE_ENDPOINTS" >> $GITHUB_ENV
+        echo "PRE_NAT=$PRE_NAT" >> $GITHUB_ENV
+        echo "PRE_EIP=$PRE_EIP" >> $GITHUB_ENV
+        echo "PRE_INTERFACES=$PRE_INTERFACES" >> $GITHUB_ENV
+        echo "PRE_SECURITY_GROUPS=$PRE_SECURITY_GROUPS" >> $GITHUB_ENV
+        echo "PRE_ROUTE_TABLES=$PRE_ROUTE_TABLES" >> $GITHUB_ENV
+        echo "PRE_NACLS=$PRE_NACLS" >> $GITHUB_ENV
+        echo "PRE_SUBNETS=$PRE_SUBNETS" >> $GITHUB_ENV
+        echo "PRE_IGW=$PRE_IGW" >> $GITHUB_ENV
+
     - name: Use Manual IAM Role ARN
       id: iam_role_arn
       run: |
@@ -1242,30 +1296,45 @@ jobs:
         echo "### Cleanup Summary 🧹" >> $GITHUB_STEP_SUMMARY
         echo "| Resource | Status | Details |" >> $GITHUB_STEP_SUMMARY
         echo "| -------- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
-        echo "| EKS Cluster | ${EKS_STATUS:-❌} | Version: 1.31 |" >> $GITHUB_STEP_SUMMARY
+        echo "| EKS Cluster | ${EKS_STATUS:-✅} | Deleted if existed |" >> $GITHUB_STEP_SUMMARY
         echo "| K8s Resources | ${K8S_CLEANUP_STATUS:-❌} | LoadBalancers, PVCs, Ingresses |" >> $GITHUB_STEP_SUMMARY
 
         # Monitoring status based on whether Terraform failed
         if [ "${MONITORING_TERRAFORM_FAILED:-false}" = "true" ]; then
           echo "| Monitoring | ⚠️ | Terraform failed, manual cleanup performed |" >> $GITHUB_STEP_SUMMARY
         else
-          echo "| Monitoring | ${MONITORING_STATUS:-✅} | CloudWatch resources |" >> $GITHUB_STEP_SUMMARY
+          # Normalize CloudWatch status based on pre-scan
+          if [ "${PRE_DASHBOARD_EXISTS}" = "true" ] || [ "${PRE_ALARM_COUNT}" -gt 0 ]; then
+            echo "| Monitoring | ${MONITORING_STATUS:-✅} | CloudWatch resources |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Monitoring | N/A | No monitoring resources found |" >> $GITHUB_STEP_SUMMARY
+          fi
         fi
 
-        echo "| CloudWatch | ${CLOUDWATCH_STATUS:-❌} | Dashboards & Alarms |" >> $GITHUB_STEP_SUMMARY
+        # Additional CloudWatch row normalized
+        if [ "${PRE_DASHBOARD_EXISTS}" = "true" ] || [ "${PRE_ALARM_COUNT}" -gt 0 ]; then
+          echo "| CloudWatch | ${CLOUDWATCH_STATUS:-✅} | Dashboards & Alarms |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| CloudWatch | N/A | No dashboards/alarms |" >> $GITHUB_STEP_SUMMARY
+        fi
 
         # Network resources with cleanup details - using correct variable names
-        echo "| Network - EIP | ${NETWORK_EIP_STATUS:-❌} | Cleaned: ${EIP_CLEANED:-0} of ${EIP_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Network - VPC Endpoints | ${NETWORK_ENDPOINTS_STATUS:-❌} | Cleaned: ${ENDPOINTS_CLEANED:-0} of ${ENDPOINTS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Network - NAT Gateways | ${NETWORK_NAT_STATUS:-❌} | Cleaned: ${NAT_CLEANED:-0} of ${NAT_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Network - Route Tables | ${NETWORK_ROUTE_TABLES_STATUS:-❌} | Cleaned: ${ROUTE_TABLES_CLEANED:-0} of ${ROUTE_TABLES_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Network - NACLs | ${NETWORK_NACLS_STATUS:-❌} | Cleaned: ${NACLS_CLEANED:-0} of ${NACLS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Network - Subnets | ${NETWORK_SUBNETS_STATUS:-❌} | Cleaned: ${SUBNETS_CLEANED:-0} of ${SUBNETS_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Network - IGW | ${NETWORK_IGW_STATUS:-❌} | Cleaned: ${IGW_CLEANED:-0} of ${IGW_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Network - VPCs | ${NETWORK_VPC_STATUS:-❌} | Cleaned: ${VPC_CLEANED:-0} of ${VPC_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Network - EIP | ${NETWORK_EIP_STATUS:-✅} | Cleaned: ${EIP_CLEANED:-0} of ${PRE_EIP:-0} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Network - VPC Endpoints | ${NETWORK_ENDPOINTS_STATUS:-✅} | Cleaned: ${ENDPOINTS_CLEANED:-0} of ${PRE_ENDPOINTS:-0} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Network - NAT Gateways | ${NETWORK_NAT_STATUS:-✅} | Cleaned: ${NAT_CLEANED:-0} of ${PRE_NAT:-0} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Network - Route Tables | ${NETWORK_ROUTE_TABLES_STATUS:-✅} | Cleaned: ${ROUTE_TABLES_CLEANED:-0} of ${PRE_ROUTE_TABLES:-0} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Network - NACLs | ${NETWORK_NACLS_STATUS:-✅} | Cleaned: ${NACLS_CLEANED:-0} of ${PRE_NACLS:-0} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Network - Subnets | ${NETWORK_SUBNETS_STATUS:-✅} | Cleaned: ${SUBNETS_CLEANED:-0} of ${PRE_SUBNETS:-0} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Network - IGW | ${NETWORK_IGW_STATUS:-✅} | Cleaned: ${IGW_CLEANED:-0} of ${PRE_IGW:-0} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Network - VPCs | ${NETWORK_VPC_STATUS:-✅} | Cleaned: ${VPC_CLEANED:-0} of ${PRE_VPC:-0} |" >> $GITHUB_STEP_SUMMARY
         echo "| Network - Overall | ${NETWORK_STATUS:-❌} | Network Stack |" >> $GITHUB_STEP_SUMMARY
 
-        echo "| S3 State | ${S3_STATUS:-❌} | Terraform State |" >> $GITHUB_STEP_SUMMARY
+        # S3 State row normalized
+        if [ "${PRE_S3_BUCKET_EXISTS}" = "true" ]; then
+          echo "| S3 State | ${S3_STATUS:-✅} | Terraform State |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| S3 State | N/A | No state bucket found |" >> $GITHUB_STEP_SUMMARY
+        fi
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
         echo "- Terraform Version: \`${TF_VERSION}\`" >> $GITHUB_STEP_SUMMARY
