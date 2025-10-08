@@ -216,13 +216,27 @@ jobs:
         run: |
           echo "⏳ Waiting for monitoring stack to be ready..."
 
-          # Wait for Prometheus
-          kubectl rollout status deployment/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-kube-prom-prometheus \
-            --namespace monitoring --timeout=10m || echo "Prometheus deployment not found"
+          # Find actual deployment names
+          echo "🔍 Finding actual deployment names..."
+          kubectl get deployments -n monitoring -o name
 
-          # Wait for Grafana
-          kubectl rollout status deployment/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-grafana \
-            --namespace monitoring --timeout=10m
+          # Wait for Prometheus (try different possible names)
+          PROMETHEUS_DEPLOY=$(kubectl get deployments -n monitoring -o name | grep -i prometheus | head -1 || echo "")
+          if [ -n "$PROMETHEUS_DEPLOY" ]; then
+            echo "⏳ Waiting for Prometheus: $PROMETHEUS_DEPLOY"
+            kubectl rollout status $PROMETHEUS_DEPLOY --namespace monitoring --timeout=10m
+          else
+            echo "⚠️ Prometheus deployment not found"
+          fi
+
+          # Wait for Grafana (try different possible names)
+          GRAFANA_DEPLOY=$(kubectl get deployments -n monitoring -o name | grep -i grafana | head -1 || echo "")
+          if [ -n "$GRAFANA_DEPLOY" ]; then
+            echo "⏳ Waiting for Grafana: $GRAFANA_DEPLOY"
+            kubectl rollout status $GRAFANA_DEPLOY --namespace monitoring --timeout=10m
+          else
+            echo "⚠️ Grafana deployment not found"
+          fi
 
           echo "✅ Monitoring stack is ready!"
 
