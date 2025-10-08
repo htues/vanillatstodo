@@ -246,33 +246,46 @@ jobs:
         run: |
           echo "📊 Getting monitoring access information..."
 
+          # Find actual service names
+          echo "🔍 Finding actual service names..."
+          kubectl get svc -n monitoring -o name
+
           # Get Grafana service details
-          GRAFANA_SERVICE_TYPE=$(kubectl get svc ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-grafana \
-            --namespace monitoring -o jsonpath='{.spec.type}')
+          GRAFANA_SVC=$(kubectl get svc -n monitoring -o name | grep -i grafana | head -1 || echo "")
+          if [ -n "$GRAFANA_SVC" ]; then
+            GRAFANA_SERVICE_TYPE=$(kubectl get $GRAFANA_SVC --namespace monitoring -o jsonpath='{.spec.type}')
+            echo "GRAFANA_SERVICE_TYPE=${GRAFANA_SERVICE_TYPE}" >> $GITHUB_ENV
 
-          echo "GRAFANA_SERVICE_TYPE=${GRAFANA_SERVICE_TYPE}" >> $GITHUB_ENV
-
-          if [ "$GRAFANA_SERVICE_TYPE" = "LoadBalancer" ]; then
-            echo "⏳ Waiting for Grafana LoadBalancer..."
-            for i in {1..20}; do
-              GRAFANA_URL=$(kubectl get svc ${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-grafana \
-                --namespace monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-              if [ -n "$GRAFANA_URL" ]; then
-                echo "GRAFANA_URL=http://${GRAFANA_URL}" >> $GITHUB_ENV
-                echo "✅ Grafana URL: http://${GRAFANA_URL}"
-                break
-              fi
-              echo "⏳ Waiting for Grafana external IP... (${i}/20)"
-              sleep 15
-            done
+            if [ "$GRAFANA_SERVICE_TYPE" = "LoadBalancer" ]; then
+              echo "⏳ Waiting for Grafana LoadBalancer..."
+              for i in {1..20}; do
+                GRAFANA_URL=$(kubectl get $GRAFANA_SVC --namespace monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+                if [ -n "$GRAFANA_URL" ]; then
+                  echo "GRAFANA_URL=http://${GRAFANA_URL}" >> $GITHUB_ENV
+                  echo "✅ Grafana URL: http://${GRAFANA_URL}"
+                  break
+                fi
+                echo "⏳ Waiting for Grafana external IP... (${i}/20)"
+                sleep 15
+              done
+            else
+              echo "GRAFANA_URL=kubectl port-forward" >> $GITHUB_ENV
+              echo "ℹ️ Grafana is accessible via: kubectl port-forward svc/${GRAFANA_SVC#deployment/} 3000:80 --namespace monitoring"
+            fi
           else
+            echo "⚠️ Grafana service not found"
             echo "GRAFANA_URL=kubectl port-forward" >> $GITHUB_ENV
-            echo "ℹ️ Grafana is accessible via: kubectl port-forward svc/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-grafana 3000:80 --namespace monitoring"
           fi
 
           # Get Prometheus URL
-          echo "PROMETHEUS_URL=kubectl port-forward" >> $GITHUB_ENV
-          echo "ℹ️ Prometheus is accessible via: kubectl port-forward svc/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-kube-prom-prometheus 9090:9090 --namespace monitoring"
+          PROMETHEUS_SVC=$(kubectl get svc -n monitoring -o name | grep -i prometheus | head -1 || echo "")
+          if [ -n "$PROMETHEUS_SVC" ]; then
+            echo "PROMETHEUS_URL=kubectl port-forward" >> $GITHUB_ENV
+            echo "ℹ️ Prometheus is accessible via: kubectl port-forward svc/${PROMETHEUS_SVC#deployment/} 9090:9090 --namespace monitoring"
+          else
+            echo "⚠️ Prometheus service not found"
+            echo "PROMETHEUS_URL=kubectl port-forward" >> $GITHUB_ENV
+          fi
 
       - name: Verify Monitoring Health
         if: env.ACTION == 'install' || env.ACTION == 'upgrade'
@@ -312,7 +325,7 @@ jobs:
           if [ "${{ env.GRAFANA_URL }}" != "kubectl port-forward" ] && [ -n "${{ env.GRAFANA_URL }}" ]; then
             echo "**Grafana URL:** ${{ env.GRAFANA_URL }}" >> $GITHUB_STEP_SUMMARY
           else
-            echo "**Grafana (Port Forward):** \`kubectl port-forward svc/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-grafana 3000:80 --namespace monitoring\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Grafana (Port Forward):** \`kubectl port-forward svc/[grafana-service-name] 3000:80 --namespace monitoring\`" >> $GITHUB_STEP_SUMMARY
           fi
-          echo "**Prometheus (Port Forward):** \`kubectl port-forward svc/${{ env.APP_NAME }}-monitoring-${{ env.ENVIRONMENT }}-prometheus-stack-kube-prom-prometheus 9090:9090 --namespace monitoring\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Prometheus (Port Forward):** \`kubectl port-forward svc/[prometheus-service-name] 9090:9090 --namespace monitoring\`" >> $GITHUB_STEP_SUMMARY
           echo "**Default Credentials:** admin / admin123" >> $GITHUB_STEP_SUMMARY
