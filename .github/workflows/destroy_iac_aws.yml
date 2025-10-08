@@ -710,6 +710,63 @@ jobs:
           echo "ℹ️ No VPC found, skipping dependency cleanup"
         fi
 
+    - name: Cleanup Elastic IPs
+      id: eip_cleanup
+      run: |
+        echo "🧹 Cleaning up Elastic IPs to prevent dependency violations..."
+        
+        # Find VPC ID for this environment
+        VPC_ID=$(aws ec2 describe-vpcs \
+          --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+          --query "Vpcs[0].VpcId" --output text 2>/dev/null || echo "None")
+        
+        if [ "$VPC_ID" != "None" ] && [ "$VPC_ID" != "null" ] && [ ! -z "$VPC_ID" ]; then
+          echo "🔍 Found VPC: $VPC_ID"
+          
+          # Get all Elastic IPs in this VPC
+          EIP_ALLOCATION_IDS=$(aws ec2 describe-addresses \
+            --filters "Name=domain,Values=vpc" \
+            --query "Addresses[?InstanceId==null && NetworkInterfaceId==null].AllocationId" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ ! -z "$EIP_ALLOCATION_IDS" ] && [ "$EIP_ALLOCATION_IDS" != "None" ]; then
+            echo "🗑️ Found unassociated Elastic IPs, releasing them..."
+            for allocation_id in $EIP_ALLOCATION_IDS; do
+              if [ -n "$allocation_id" ]; then
+                echo "   🗑️ Releasing EIP: $allocation_id"
+                aws ec2 release-address --allocation-id "$allocation_id" || echo "   ⚠️ Failed to release $allocation_id"
+              fi
+            done
+          else
+            echo "✅ No unassociated Elastic IPs found"
+          fi
+          
+          # Also check for any EIPs associated with NAT Gateways in this VPC
+          NAT_GATEWAYS=$(aws ec2 describe-nat-gateways \
+            --filter "Name=vpc-id,Values=$VPC_ID" \
+            --query "NatGateways[?State!='deleted'].NatGatewayId" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ ! -z "$NAT_GATEWAYS" ] && [ "$NAT_GATEWAYS" != "None" ]; then
+            echo "🔍 Found NAT Gateways, checking for associated EIPs..."
+            for nat_gw in $NAT_GATEWAYS; do
+              NAT_EIP=$(aws ec2 describe-nat-gateways \
+                --nat-gateway-ids "$nat_gw" \
+                --query "NatGateways[0].NatGatewayAddresses[0].AllocationId" \
+                --output text 2>/dev/null || echo "")
+              
+              if [ ! -z "$NAT_EIP" ] && [ "$NAT_EIP" != "None" ]; then
+                echo "   🗑️ Releasing EIP from NAT Gateway: $NAT_EIP"
+                aws ec2 release-address --allocation-id "$NAT_EIP" || echo "   ⚠️ Failed to release $NAT_EIP"
+              fi
+            done
+          fi
+        else
+          echo "ℹ️ No VPC found, skipping EIP cleanup"
+        fi
+        
+        echo "✅ Elastic IP cleanup completed"
+
     - name: Destroy Network Resources
       id: network_cleanup
       run: |
