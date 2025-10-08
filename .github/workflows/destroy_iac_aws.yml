@@ -767,6 +767,109 @@ jobs:
         
         echo "✅ Elastic IP cleanup completed"
 
+    - name: Force Detach Internet Gateway
+      id: force_detach_igw
+      run: |
+        echo "🔧 Force detaching Internet Gateway to break dependencies..."
+        
+        # Find VPC ID
+        VPC_ID=$(aws ec2 describe-vpcs \
+          --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+          --query "Vpcs[0].VpcId" --output text 2>/dev/null || echo "None")
+        
+        if [ "$VPC_ID" != "None" ] && [ "$VPC_ID" != "null" ] && [ ! -z "$VPC_ID" ]; then
+          echo "🔍 Found VPC: $VPC_ID"
+          
+          # Find IGW attached to this VPC
+          IGW_ID=$(aws ec2 describe-internet-gateways \
+            --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+            --query "InternetGateways[0].InternetGatewayId" \
+            --output text 2>/dev/null || echo "None")
+          
+          if [ "$IGW_ID" != "None" ] && [ "$IGW_ID" != "null" ] && [ ! -z "$IGW_ID" ]; then
+            echo "🔍 Found IGW: $IGW_ID"
+            
+            # Force detach IGW
+            echo "🔧 Force detaching IGW from VPC..."
+            aws ec2 detach-internet-gateway --internet-gateway-id "$IGW_ID" --vpc-id "$VPC_ID" || echo "⚠️ IGW already detached or failed to detach"
+            
+            # Wait a moment for detachment to complete
+            sleep 10
+            
+            # Try to delete the IGW
+            echo "🗑️ Attempting to delete IGW..."
+            aws ec2 delete-internet-gateway --internet-gateway-id "$IGW_ID" || echo "⚠️ IGW deletion failed, will let Terraform handle it"
+          else
+            echo "ℹ️ No IGW found attached to VPC"
+          fi
+        else
+          echo "ℹ️ No VPC found, skipping IGW detachment"
+        fi
+
+    - name: Force Delete Subnet Dependencies
+      id: force_delete_subnet_deps
+      run: |
+        echo "🔧 Force deleting subnet dependencies..."
+        
+        # Find VPC ID
+        VPC_ID=$(aws ec2 describe-vpcs \
+          --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" "Name=tag:Environment,Values=${{ env.ENVIRONMENT }}" \
+          --query "Vpcs[0].VpcId" --output text 2>/dev/null || echo "None")
+        
+        if [ "$VPC_ID" != "None" ] && [ "$VPC_ID" != "null" ] && [ ! -z "$VPC_ID" ]; then
+          echo "🔍 Found VPC: $VPC_ID"
+          
+          # Get all subnets in this VPC
+          SUBNET_IDS=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "Subnets[].SubnetId" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ ! -z "$SUBNET_IDS" ] && [ "$SUBNET_IDS" != "None" ]; then
+            echo "🔍 Found subnets: $SUBNET_IDS"
+            
+            # Force delete any remaining network interfaces in these subnets
+            for subnet_id in $SUBNET_IDS; do
+              echo "🔧 Checking dependencies for subnet: $subnet_id"
+              
+              # Get network interfaces in this subnet
+              ENI_IDS=$(aws ec2 describe-network-interfaces \
+                --filters "Name=subnet-id,Values=$subnet_id" \
+                --query "NetworkInterfaces[].NetworkInterfaceId" \
+                --output text 2>/dev/null || echo "")
+              
+              if [ ! -z "$ENI_IDS" ] && [ "$ENI_IDS" != "None" ]; then
+                echo "🗑️ Force deleting network interfaces in subnet $subnet_id: $ENI_IDS"
+                for eni_id in $ENI_IDS; do
+                  if [ -n "$eni_id" ]; then
+                    aws ec2 delete-network-interface --network-interface-id "$eni_id" || echo "⚠️ Failed to delete ENI $eni_id"
+                  fi
+                done
+              fi
+              
+              # Force delete any route tables associated with this subnet
+              RT_IDS=$(aws ec2 describe-route-tables \
+                --filters "Name=association.subnet-id,Values=$subnet_id" \
+                --query "RouteTables[].RouteTableId" \
+                --output text 2>/dev/null || echo "")
+              
+              if [ ! -z "$RT_IDS" ] && [ "$RT_IDS" != "None" ]; then
+                echo "🗑️ Force deleting route tables for subnet $subnet_id: $RT_IDS"
+                for rt_id in $RT_IDS; do
+                  if [ -n "$rt_id" ]; then
+                    # Disassociate first
+                    aws ec2 disassociate-route-table --association-id "$rt_id" || echo "⚠️ Failed to disassociate RT $rt_id"
+                    # Then delete
+                    aws ec2 delete-route-table --route-table-id "$rt_id" || echo "⚠️ Failed to delete RT $rt_id"
+                  fi
+                done
+              fi
+            done
+          fi
+        fi
+        
+        echo "✅ Subnet dependency cleanup completed"
+
     - name: Destroy Network Resources
       id: network_cleanup
       run: |
